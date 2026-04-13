@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { apiCall, seedSpark, sparkLabels } from '@/lib/api'
 import { DApp, SponsorEvent, UsageSummary } from '@/types'
@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const txnSeries = usage.dailySeries ?? seedSpark(14, 120, 60)
   const gasSeries = usage.gasSeries   ?? seedSpark(14, 5000000, 2000000)
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!jwt) return
     setIsDemo(false)
     const [uR, dR, kR] = await Promise.all([
@@ -63,9 +63,9 @@ export default function DashboardPage() {
     if (uR.ok && (uR.data as UsageSummary).events?.length) {
       setEvents((uR.data as UsageSummary).events!)
     }
-  }
+  }, [jwt])
 
-  useEffect(() => { load() }, [jwt])
+  useEffect(() => { load() }, [load])
 
   const kpiTxns  = isDemo ? '—' : (usage.totalSponsored ?? usage.count ?? 0).toLocaleString()
   const kpiGas   = isDemo ? '—' : `${((usage.totalGasBudget ?? usage.gasUsed ?? 0) / 1e6).toFixed(1)}M`

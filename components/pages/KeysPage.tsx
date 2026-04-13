@@ -64,7 +64,7 @@ export default function KeysPage() {
       />
 
       <InfoPill>
-        When you generate a new key, copy it immediately. For security, you won't be able to see the full key again after closing this page.
+        When you generate a new key, copy it immediately. For security, you will not be able to see the full key again after closing this page.
       </InfoPill>
 
       <FormPanel title="Create a new key">
