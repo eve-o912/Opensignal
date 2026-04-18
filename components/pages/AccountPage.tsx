@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
-import { apiCall } from '@/lib/api'
+import { apiCall, getApiErrorMessage } from '@/lib/api'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
 import Input from '@/components/ui/Input'
@@ -27,24 +27,24 @@ export default function AccountPage() {
 
   async function doSignup() {
     setSuLoading(true); setSuState(null)
-    const r = await apiCall('POST', '/v1/auth/signup', { email: suEmail, password: suPass })
+    const r = await apiCall('POST', '/v1/portal/auth/signup', { email: suEmail, password: suPass })
     setSuLoading(false)
     setSuState(r.ok
       ? { ok: true,  msg: 'Account created! Sign in below to get started.' }
-      : { ok: false, msg: (r.data as { error?: string }).error ?? 'Something went wrong. Please try again.' }
+      : { ok: false, msg: getApiErrorMessage(r.data, 'Something went wrong. Please try again.') }
     )
   }
 
   async function doLogin() {
     setLiLoading(true); setLiState(null)
-    const r = await apiCall<{ token?: string }>('POST', '/v1/auth/login', { email: liEmail, password: liPass })
+    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
     setLiLoading(false)
     if (r.ok && r.data.token) {
       setJwt(r.data.token)
       setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
       show('Signed in successfully')
     } else {
-      setLiState({ ok: false, msg: (r.data as { error?: string }).error ?? 'Incorrect email or password.' })
+      setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
     }
   }
 

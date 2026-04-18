@@ -1,6 +1,8 @@
 'use client'
 
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+
+const DEFAULT_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE ?? 'https://opensignal.onrender.com').replace(/\/$/, '')
 
 interface AuthCtx {
   jwt: string | null
@@ -12,13 +14,19 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx>({
   jwt: null,
   setJwt: () => {},
-  baseUrl: 'https://api.opensignal.xyz',
+  baseUrl: DEFAULT_BASE_URL,
   setBaseUrl: () => {},
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [jwt, setJwt] = useState<string | null>(null)
-  const [baseUrl, setBaseUrl] = useState('https://api.opensignal.xyz')
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('os_base_url')
+    if (stored) setBaseUrl(stored.replace(/\/$/, ''))
+  }, [])
+
   return (
     <AuthContext.Provider value={{ jwt, setJwt, baseUrl, setBaseUrl }}>
       {children}

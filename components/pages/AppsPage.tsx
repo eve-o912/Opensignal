@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { apiCall } from '@/lib/api'
+import { apiCall, getApiErrorMessage } from '@/lib/api'
 import { DApp } from '@/types'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
@@ -11,6 +11,24 @@ import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
+
+interface PortalDApp {
+  id: string
+  name: string
+  network?: 'testnet' | 'mainnet'
+  dailyBudgetMist?: number
+  allowlistMode?: 'strict' | 'open'
+}
+
+function toUiDApp(dapp: PortalDApp): DApp {
+  return {
+    id: dapp.id,
+    name: dapp.name,
+    description: dapp.network,
+    wildcardSponsor: dapp.allowlistMode === 'open',
+    maxGasBudget: dapp.dailyBudgetMist,
+  }
+}
 
 export default function AppsPage() {
   const { jwt } = useAuth()
@@ -26,9 +44,9 @@ export default function AppsPage() {
   const loadDapps = useCallback(async () => {
     if (!jwt) return
     setLoading(true)
-    const r = await apiCall<DApp[] | { dapps: DApp[] }>('GET', '/v1/dapps', undefined, jwt)
+    const r = await apiCall<{ apps?: PortalDApp[] }>('GET', '/v1/portal/apps', undefined, jwt)
     setLoading(false)
-    if (r.ok) setDapps(Array.isArray(r.data) ? r.data : (r.data as { dapps: DApp[] }).dapps ?? [])
+    if (r.ok) setDapps((r.data.apps ?? []).map(toUiDApp))
   }, [jwt])
 
   useEffect(() => { loadDapps() }, [loadDapps])
@@ -36,11 +54,11 @@ export default function AppsPage() {
   async function doCreate() {
     setCreating(true); setCreateState(null)
     const pkgList = pkgs.split(',').map((s) => s.trim()).filter(Boolean)
-    const r = await apiCall('POST', '/v1/dapps', {
-      name, description: desc,
-      allowedPackages: pkgList,
-      wildcardSponsor: pkgList.length === 0,
-      maxGasBudget: parseInt(maxGas) || 50000000,
+    const r = await apiCall('POST', '/v1/portal/apps', {
+      name,
+      network: 'testnet',
+      dailyBudgetMist: parseInt(maxGas, 10) || undefined,
+      allowlistMode: pkgList.length === 0 ? 'open' : 'strict',
     }, jwt)
     setCreating(false)
     if (r.ok) {
@@ -48,7 +66,7 @@ export default function AppsPage() {
       setName(''); setDesc(''); setPkgs(''); setMaxGas('')
       loadDapps()
     } else {
-      setCreateState({ ok: false, msg: (r.data as { error?: string }).error ?? "Couldn't register app. Make sure you're signed in." })
+      setCreateState({ ok: false, msg: getApiErrorMessage(r.data, "Couldn't register app. Make sure you're signed in.") })
     }
   }
 

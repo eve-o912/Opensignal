@@ -1,9 +1,28 @@
-const DEFAULT_BASE = 'https://api.opensignal.xyz'
+const DEFAULT_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? 'https://opensignal.onrender.com').replace(/\/$/, '')
+
+function normalizeBase(base: string): string {
+  const trimmed = base.trim()
+  return trimmed.replace(/\/$/, '')
+}
 
 function getBase(): string {
   if (typeof window === 'undefined') return DEFAULT_BASE
   const stored = localStorage.getItem('os_base_url')
-  return stored ? stored.replace(/\/$/, '') : DEFAULT_BASE
+  return stored ? normalizeBase(stored) : DEFAULT_BASE
+}
+
+export function getApiErrorMessage(data: unknown, fallback = 'Request failed'): string {
+  if (!data || typeof data !== 'object') return fallback
+  const record = data as Record<string, unknown>
+  const directError = record.error
+
+  if (typeof directError === 'string') return directError
+  if (directError && typeof directError === 'object') {
+    const nested = directError as Record<string, unknown>
+    if (typeof nested.message === 'string') return nested.message
+  }
+  if (typeof record.message === 'string') return record.message
+  return fallback
 }
 
 interface CallResult<T = unknown> {
@@ -23,15 +42,28 @@ export async function apiCall<T = unknown>(
   if (jwt) headers['Authorization'] = `Bearer ${jwt}`
   if (apiKey) headers['x-api-key'] = apiKey
 
-  try {
-    const res = await fetch(getBase() + path, {
+  async function call(base: string): Promise<CallResult<T>> {
+    const res = await fetch(base + path, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
     })
     const json = await res.json().catch(() => ({ error: 'Non-JSON response' }))
     return { ok: res.ok, status: res.status, data: json }
+  }
+
+  const base = getBase()
+
+  try {
+    return await call(base)
   } catch (e) {
+    if (base !== DEFAULT_BASE) {
+      try {
+        return await call(DEFAULT_BASE)
+      } catch {
+        // Fall through to generic network error below.
+      }
+    }
     const msg = e instanceof Error ? e.message : 'Network error'
     return { ok: false, status: 0, data: { error: msg } as T }
   }
