@@ -27,8 +27,15 @@ export default function AccountPage() {
 
   async function doSignup() {
     setSuLoading(true); setSuState(null)
-    const r = await apiCall('POST', '/v1/portal/auth/signup', { email: suEmail, password: suPass })
+    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/signup', { email: suEmail, password: suPass })
     setSuLoading(false)
+    if (r.ok && r.data.token) {
+      setJwt(r.data.token)
+      setSuState({ ok: true, msg: 'Account created and signed in. You can now create apps and keys.' })
+      show('Welcome to OpenSignal')
+      return
+    }
+
     setSuState(r.ok
       ? { ok: true,  msg: 'Account created! Sign in below to get started.' }
       : { ok: false, msg: getApiErrorMessage(r.data, 'Something went wrong. Please try again.') }

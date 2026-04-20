@@ -6,6 +6,7 @@ const tabs = [
   { id: 'apps',      label: 'Apps' },
   { id: 'keys',      label: 'Keys' },
   { id: 'sponsor',   label: 'Sponsor' },
+  { id: 'checkout',  label: 'Checkout' },
   { id: 'settings',  label: 'Settings' },
 ]
 

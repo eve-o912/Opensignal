@@ -37,6 +37,23 @@ export interface SponsorEvent {
   createdAt?: string
 }
 
+export interface CheckoutSession {
+  id: string
+  status: string
+  recipient: string
+  purchaseAmountMist: number
+  network: string
+  memo?: string | null
+  merchantReference?: string | null
+  expiresAt?: string
+  createdAt?: string
+  dapp?: {
+    id: string
+    name: string
+    network?: string
+  }
+}
+
 export interface UsageSummary {
   totalSponsored?: number
   count?: number

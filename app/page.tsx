@@ -1,5 +1,7 @@
 'use client'
 
+"use client"
+
 import { useState } from 'react'
 import TopNav from '@/components/layout/TopNav'
 import SignalStrip from '@/components/layout/SignalStrip'
@@ -10,9 +12,10 @@ import AccountPage from '@/components/pages/AccountPage'
 import AppsPage from '@/components/pages/AppsPage'
 import KeysPage from '@/components/pages/KeysPage'
 import SponsorPage from '@/components/pages/SponsorPage'
+import CheckoutPage from '@/components/pages/CheckoutPage'
 import SettingsPage from '@/components/pages/SettingsPage'
 
-type Page = 'dashboard' | 'account' | 'apps' | 'keys' | 'sponsor' | 'settings'
+type Page = 'dashboard' | 'account' | 'apps' | 'keys' | 'sponsor' | 'checkout' | 'settings'
 
 export default function Home() {
   const [active, setActive] = useState<Page>('dashboard')
@@ -30,6 +33,7 @@ export default function Home() {
       case 'apps':      return <AppsPage />
       case 'keys':      return <KeysPage />
       case 'sponsor':   return <SponsorPage />
+      case 'checkout':  return <CheckoutPage />
       case 'settings':  return <SettingsPage />
     }
   }

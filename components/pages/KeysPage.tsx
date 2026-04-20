@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
-import { apiCall } from '@/lib/api'
+import { apiCall, getApiErrorMessage } from '@/lib/api'
 import { ApiKey } from '@/types'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
@@ -18,39 +18,83 @@ export default function KeysPage() {
   const { jwt } = useAuth()
   const { show } = useToast()
 
+  const [apps,     setApps]     = useState<Array<{ id: string; name: string }>>([])
+  const [selectedAppId, setSelectedAppId] = useState('')
   const [keyName,  setKeyName]  = useState('')
-  const [dappId,   setDappId]   = useState('')
   const [creating, setCreating] = useState(false)
   const [createState, setCreateState] = useState<{ ok: boolean; msg: string } | null>(null)
   const [keys,     setKeys]     = useState<ApiKey[]>([])
   const [loading,  setLoading]  = useState(false)
 
-  const loadKeys = useCallback(async () => {
+  const loadApps = useCallback(async () => {
     if (!jwt) return
-    setLoading(true)
-    const r = await apiCall<ApiKey[] | { keys: ApiKey[] }>('GET', '/v1/keys', undefined, jwt)
-    setLoading(false)
-    if (r.ok) setKeys(Array.isArray(r.data) ? r.data : (r.data as { keys: ApiKey[] }).keys ?? [])
+    const r = await apiCall<{ apps?: Array<{ id: string; name: string }> }>('GET', '/v1/portal/apps', undefined, jwt)
+    if (!r.ok) return
+
+    const appList = r.data.apps ?? []
+    setApps(appList)
+    setSelectedAppId((prev) => prev || appList[0]?.id || '')
   }, [jwt])
+
+  const loadKeys = useCallback(async () => {
+    if (!jwt || !selectedAppId) {
+      setKeys([])
+      return
+    }
+
+    setLoading(true)
+    const r = await apiCall<{ apiKeys?: Array<{ id: string; label?: string | null; keyPrefix: string; status: string; createdAt?: string }> }>(
+      'GET',
+      `/v1/portal/apps/${encodeURIComponent(selectedAppId)}/api-keys`,
+      undefined,
+      jwt
+    )
+    setLoading(false)
+    if (!r.ok) return
+
+    const mapped: ApiKey[] = (r.data.apiKeys ?? []).map((k) => ({
+      id: k.id,
+      name: k.label ?? 'Unnamed key',
+      key: k.keyPrefix,
+      dappId: selectedAppId,
+      revoked: k.status === 'REVOKED',
+      createdAt: k.createdAt,
+    }))
+    setKeys(mapped)
+  }, [jwt, selectedAppId])
+
+  useEffect(() => { loadApps() }, [loadApps])
 
   useEffect(() => { loadKeys() }, [loadKeys])
 
   async function doCreate() {
+    if (!selectedAppId) return
     setCreating(true); setCreateState(null)
-    const r = await apiCall('POST', '/v1/keys', { name: keyName, dappId }, jwt)
+    const r = await apiCall<{ secret?: string }>(
+      'POST',
+      `/v1/portal/apps/${encodeURIComponent(selectedAppId)}/api-keys`,
+      { label: keyName || undefined },
+      jwt
+    )
     setCreating(false)
     if (r.ok) {
-      setCreateState({ ok: true, msg: "Key created! Copy it now — it won't be shown in full again." })
-      setKeyName(''); setDappId('')
+      const createdSecret = r.data.secret
+      setCreateState({
+        ok: true,
+        msg: createdSecret
+          ? `Key created. Save this secret now: ${createdSecret}`
+          : "Key created! Copy it now — it won't be shown in full again.",
+      })
+      setKeyName('')
       loadKeys()
     } else {
-      setCreateState({ ok: false, msg: (r.data as { error?: string }).error ?? "Couldn't create key. Check you're signed in and the app ID is correct." })
+      setCreateState({ ok: false, msg: getApiErrorMessage(r.data, "Couldn't create key. Check you're signed in and app access is valid.") })
     }
   }
 
   async function revokeKey(id: string) {
     if (!confirm('Revoke this key? It will stop working immediately.')) return
-    await apiCall('DELETE', `/v1/keys/${id}`, undefined, jwt)
+    await apiCall('POST', `/v1/portal/api-keys/${encodeURIComponent(id)}/revoke`, {}, jwt)
     show('Key revoked')
     loadKeys()
   }
@@ -72,10 +116,22 @@ export default function KeysPage() {
           <Input label="Key nickname" placeholder="e.g. Production key"
             value={keyName} onChange={(e) => setKeyName(e.target.value)}
             hint="A label just for you" />
-          <Input label="Which app is this for?" placeholder="Paste your app ID here"
-            value={dappId} onChange={(e) => setDappId(e.target.value)} />
+          <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+            Which app is this for?
+            <select
+              className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              value={selectedAppId}
+              onChange={(e) => setSelectedAppId(e.target.value)}
+              disabled={!apps.length}
+            >
+              {!apps.length && <option value="">No apps available</option>}
+              {apps.map((app) => (
+                <option key={app.id} value={app.id}>{app.name} ({app.id})</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <Button variant="primary" onClick={doCreate} disabled={creating || !keyName || !dappId}>
+        <Button variant="primary" onClick={doCreate} disabled={creating || !selectedAppId}>
           {creating ? 'Generating…' : 'Generate key'}
         </Button>
         {createState && <ResponseBox ok={createState.ok} friendly={createState.msg} />}

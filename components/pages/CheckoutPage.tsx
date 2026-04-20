@@ -1,0 +1,414 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
+import { apiCall, getApiErrorMessage } from '@/lib/api'
+import SectionHeader from '@/components/layout/SectionHeader'
+import FormPanel from '@/components/layout/FormPanel'
+import Input from '@/components/ui/Input'
+import Textarea from '@/components/ui/Textarea'
+import Button from '@/components/ui/Button'
+import ResponseBox from '@/components/ui/ResponseBox'
+import Spinner from '@/components/ui/Spinner'
+import Badge from '@/components/ui/Badge'
+import { CheckoutSession } from '@/types'
+
+interface PortalApp {
+  id: string
+  name: string
+}
+
+interface CheckoutCreateResponse {
+  session: CheckoutSession
+  checkoutToken: string
+  checkoutUrl: string
+}
+
+interface CheckoutLookupResponse {
+  session: CheckoutSession
+}
+
+interface CheckoutSponsorResponse {
+  session: {
+    id: string
+    status: string
+  }
+  transactionBytes?: string
+  sponsorSignature?: string
+  paymentIntent?: {
+    merchantReference?: string | null
+    recipient?: string | null
+    purchaseAmountMist?: number | null
+    memo?: string | null
+  }
+}
+
+interface LinkedWalletInfo {
+  address: string
+  provider: string
+  signature?: string
+  message?: string
+}
+
+interface InjectedWalletProvider {
+  name?: string
+  features?: Record<string, unknown>
+  connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
+  getAccounts?: () => Promise<Array<{ address?: string }>>
+  signMessage?: (input: { message: string }) => Promise<{ signature?: string }>
+}
+
+function getInjectedWalletProviders(): InjectedWalletProvider[] {
+  if (typeof window === 'undefined') return []
+
+  const win = window as Window & {
+    getWallets?: () => InjectedWalletProvider[]
+    wallets?: InjectedWalletProvider[]
+    suiWallet?: InjectedWalletProvider
+  }
+
+  if (typeof win.getWallets === 'function') return win.getWallets().filter(Boolean)
+  if (Array.isArray(win.wallets)) return win.wallets.filter(Boolean)
+  if (win.suiWallet) return [win.suiWallet]
+  return []
+}
+
+function readLinkedWallet(sessionKey: string): LinkedWalletInfo | null {
+  if (typeof window === 'undefined' || !sessionKey) return null
+  const stored = localStorage.getItem(`os_linked_wallet:${sessionKey}`)
+  if (!stored) return null
+
+  try {
+    return JSON.parse(stored) as LinkedWalletInfo
+  } catch {
+    return null
+  }
+}
+
+function saveLinkedWallet(sessionKey: string, wallet: LinkedWalletInfo | null) {
+  if (typeof window === 'undefined' || !sessionKey) return
+  const key = `os_linked_wallet:${sessionKey}`
+  if (!wallet) {
+    localStorage.removeItem(key)
+    return
+  }
+
+  localStorage.setItem(key, JSON.stringify(wallet))
+}
+
+export default function CheckoutPage() {
+  const { jwt } = useAuth()
+  const searchParams = useSearchParams()
+
+  const sessionId = searchParams.get('checkoutSessionId') ?? ''
+  const checkoutToken = searchParams.get('checkoutToken') ?? ''
+
+  const [apps, setApps] = useState<PortalApp[]>([])
+  const [selectedAppId, setSelectedAppId] = useState('')
+  const [reference, setReference] = useState('')
+  const [recipient, setRecipient] = useState('')
+  const [amount, setAmount] = useState('')
+  const [network, setNetwork] = useState<'testnet' | 'mainnet'>('testnet')
+  const [memo, setMemo] = useState('')
+  const [expiresInMinutes, setExpiresInMinutes] = useState('30')
+  const [merchantLoading, setMerchantLoading] = useState(false)
+  const [merchantState, setMerchantState] = useState<{ ok: boolean; msg: string; raw?: Record<string, unknown> } | null>(null)
+  const [checkoutUrl, setCheckoutUrl] = useState('')
+  const [sessionDetails, setSessionDetails] = useState<CheckoutSession | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(false)
+
+  const [sender, setSender] = useState('')
+  const [linkedWallet, setLinkedWallet] = useState<LinkedWalletInfo | null>(null)
+  const [walletLinkLoading, setWalletLinkLoading] = useState(false)
+  const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [transactionKind, setTransactionKind] = useState('')
+  const [maxGasBudget, setMaxGasBudget] = useState('')
+  const [buyerLoading, setBuyerLoading] = useState(false)
+  const [buyerState, setBuyerState] = useState<{ ok: boolean; msg: string; raw?: Record<string, unknown> } | null>(null)
+
+  const publicCheckoutLink = useMemo(() => {
+    if (!checkoutUrl) return ''
+    return checkoutUrl
+  }, [checkoutUrl])
+
+  useEffect(() => {
+    async function loadApps() {
+      if (!jwt) {
+        setApps([])
+        return
+      }
+
+      const r = await apiCall<{ apps?: PortalApp[] }>('GET', '/v1/portal/apps', undefined, jwt)
+      if (r.ok) {
+        const appList = r.data.apps ?? []
+        setApps(appList)
+        setSelectedAppId((current) => current || appList[0]?.id || '')
+      }
+    }
+
+    loadApps()
+  }, [jwt])
+
+  useEffect(() => {
+    async function loadSession() {
+      if (!sessionId || !checkoutToken) {
+        setSessionDetails(null)
+        return
+      }
+
+      setSessionLoading(true)
+      const r = await apiCall<CheckoutLookupResponse>('GET', `/v1/checkout/sessions/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(checkoutToken)}`)
+      setSessionLoading(false)
+      if (r.ok) {
+        setSessionDetails(r.data.session)
+        setRecipient(r.data.session.recipient)
+        setAmount(String(r.data.session.purchaseAmountMist))
+        setNetwork(r.data.session.network === 'mainnet' ? 'mainnet' : 'testnet')
+
+        const stored = readLinkedWallet(r.data.session.id)
+        if (stored) {
+          setLinkedWallet(stored)
+          setSender(stored.address)
+        }
+      }
+    }
+
+    loadSession()
+  }, [sessionId, checkoutToken])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const sessionKey = sessionDetails?.id || sessionId
+    if (!sessionKey) return
+
+    const stored = readLinkedWallet(sessionKey)
+    if (stored) {
+      setLinkedWallet(stored)
+      if (!sender) setSender(stored.address)
+    }
+  }, [sender, sessionDetails?.id, sessionId])
+
+  async function linkWallet() {
+    setWalletLinkLoading(true)
+    setWalletLinkState(null)
+
+    try {
+      const providers = getInjectedWalletProviders()
+      if (!providers.length) {
+        throw new Error('No Sui wallet extension detected. Install a compatible wallet and try again.')
+      }
+
+      const provider = providers[0]
+      const connected = await provider.connect?.({})
+      const accountAddress = connected?.accounts?.[0]?.address ?? (await provider.getAccounts?.())?.[0]?.address
+
+      if (!accountAddress) {
+        throw new Error('Wallet did not return an account address.')
+      }
+
+      const message = `OpenSignal wallet link\nSession: ${sessionDetails?.id ?? sessionId ?? 'merchant-flow'}\nAddress: ${accountAddress}\nNonce: ${Date.now()}`
+      const signatureResult = await provider.signMessage?.({ message })
+
+      const walletInfo: LinkedWalletInfo = {
+        address: accountAddress,
+        provider: provider.name ?? 'Sui wallet',
+        signature: signatureResult?.signature,
+        message,
+      }
+
+      const sessionKey = sessionDetails?.id || sessionId
+      if (sessionKey) saveLinkedWallet(sessionKey, walletInfo)
+
+      setLinkedWallet(walletInfo)
+      setSender(accountAddress)
+      setWalletLinkState({ ok: true, msg: `Wallet linked: ${accountAddress}` })
+    } catch (error) {
+      setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
+    } finally {
+      setWalletLinkLoading(false)
+    }
+  }
+
+  async function createCheckoutSession() {
+    if (!jwt || !selectedAppId) return
+
+    setMerchantLoading(true)
+    setMerchantState(null)
+    const r = await apiCall<CheckoutCreateResponse>(
+      'POST',
+      '/v1/portal/checkout/sessions',
+      {
+        appId: selectedAppId,
+        recipient,
+        purchaseAmountMist: parseInt(amount, 10),
+        network,
+        memo: memo || undefined,
+        merchantReference: reference || undefined,
+        expiresInMinutes: parseInt(expiresInMinutes, 10) || 30,
+      },
+      jwt,
+    )
+    setMerchantLoading(false)
+
+    if (r.ok) {
+      setCheckoutUrl(r.data.checkoutUrl)
+      setSessionDetails(r.data.session)
+      setMerchantState({
+        ok: true,
+        msg: 'Checkout session created. Share the link with the customer so they can complete payment without paying gas.',
+        raw: { checkoutUrl: r.data.checkoutUrl, checkoutToken: r.data.checkoutToken, session: r.data.session },
+      })
+    } else {
+      setMerchantState({ ok: false, msg: getApiErrorMessage(r.data, 'Could not create checkout session.') })
+    }
+  }
+
+  async function completeCheckout() {
+    if (!sessionId || !checkoutToken) return
+
+    setBuyerLoading(true)
+    setBuyerState(null)
+    const r = await apiCall<CheckoutSponsorResponse>(
+      'POST',
+      `/v1/checkout/sessions/${encodeURIComponent(sessionId)}/sponsor`,
+      {
+        token: checkoutToken,
+        sender,
+        transactionKind,
+        ...(maxGasBudget ? { maxGasBudget: parseInt(maxGasBudget, 10) } : {}),
+      },
+    )
+    setBuyerLoading(false)
+
+    if (r.ok) {
+      setBuyerState({
+        ok: true,
+        msg: 'Payment completed. The transaction was gas-sponsored and signed successfully.',
+        raw: r.data as unknown as Record<string, unknown>,
+      })
+      setSessionDetails((current) => current ? { ...current, status: 'COMPLETED' } : current)
+    } else {
+      setBuyerState({ ok: false, msg: getApiErrorMessage(r.data, 'Checkout failed. Check the session link and transaction bytes.') })
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        eyebrow="Payments"
+        title="Sponsored checkout"
+        sub="Create a merchant checkout session, then let the customer complete the payment from their linked wallet while OpenSignal covers gas."
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+        <FormPanel step={1} title="Create a checkout session" desc="Merchant backend creates a time-limited payment intent with the recipient and amount locked in.">
+          {!jwt && <p className="text-sm text-blue-400 mb-3">Sign in as a merchant to mint checkout sessions.</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+              App
+              <select
+                className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={selectedAppId}
+                onChange={(e) => setSelectedAppId(e.target.value)}
+                disabled={!apps.length}
+              >
+                {!apps.length && <option value="">No apps available</option>}
+                {apps.map((app) => (
+                  <option key={app.id} value={app.id}>{app.name}</option>
+                ))}
+              </select>
+            </label>
+            <Input label="Merchant reference" placeholder="order-12345"
+              value={reference} onChange={(e) => setReference(e.target.value)} />
+            <Input label="Recipient address" placeholder="0x..."
+              value={recipient} onChange={(e) => setRecipient(e.target.value)} />
+            <Input label="Amount (MIST)" placeholder="100000000" type="number"
+              value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <Input label="Expires in minutes" placeholder="30" type="number"
+              value={expiresInMinutes} onChange={(e) => setExpiresInMinutes(e.target.value)} />
+            <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+              Network
+              <select
+                className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={network}
+                onChange={(e) => setNetwork(e.target.value === 'mainnet' ? 'mainnet' : 'testnet')}
+              >
+                <option value="testnet">testnet</option>
+                <option value="mainnet">mainnet</option>
+              </select>
+            </label>
+          </div>
+          <Textarea label="Memo (optional)" placeholder="Subscription, one-time purchase, etc."
+            value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            <Button variant="primary" onClick={createCheckoutSession} disabled={merchantLoading || !jwt || !selectedAppId || !recipient || !amount}>
+              {merchantLoading ? 'Creating…' : 'Create checkout session'}
+            </Button>
+            {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
+          </div>
+          {merchantLoading && <Spinner label="Creating checkout session…" />}
+          {merchantState && <ResponseBox ok={merchantState.ok} friendly={merchantState.msg} raw={merchantState.raw} />}
+          {publicCheckoutLink && (
+            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 break-all">
+              <p className="font-semibold mb-1">Checkout link</p>
+              <a href={publicCheckoutLink} className="underline">{publicCheckoutLink}</a>
+            </div>
+          )}
+        </FormPanel>
+
+        <FormPanel step={2} title="Customer checkout" desc="Open the checkout link, sign the transaction from the linked wallet, and let OpenSignal sponsor the gas.">
+          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">Linked wallet</p>
+                <p className="text-xs text-blue-500">Connect a Sui wallet, prove ownership, and auto-fill the sender.</p>
+              </div>
+              <Button variant="sm" onClick={linkWallet} disabled={walletLinkLoading}>
+                {walletLinkLoading ? 'Linking…' : linkedWallet ? 'Relink wallet' : 'Link wallet'}
+              </Button>
+            </div>
+            {linkedWallet && (
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                <Badge variant="ok">{linkedWallet.provider}</Badge>
+                <span className="text-xs text-blue-900 font-mono">{linkedWallet.address}</span>
+              </div>
+            )}
+            {walletLinkState && (
+              <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${walletLinkState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                {walletLinkState.msg}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <Input label="Checkout session ID" value={sessionId} readOnly placeholder="Generated from merchant flow" />
+            <Input label="Checkout token" value={checkoutToken} readOnly placeholder="Generated from merchant flow" />
+            <Input label="Linked wallet address" placeholder="0x..."
+              value={sender} onChange={(e) => setSender(e.target.value)} />
+            <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
+              value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
+          </div>
+          <Textarea label="Transaction kind bytes" placeholder="Wallet-generated base64 transaction kind bytes"
+            value={transactionKind} onChange={(e) => setTransactionKind(e.target.value)} />
+          <div className="mt-4 flex items-center gap-2 flex-wrap">
+            <Button variant="primary" onClick={completeCheckout} disabled={buyerLoading || !sessionId || !checkoutToken || !sender || !transactionKind}>
+              {buyerLoading ? 'Completing…' : 'Complete checkout'}
+            </Button>
+            {sessionLoading && <Spinner label="Loading checkout session…" />}
+            {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
+          </div>
+          {sessionDetails && (
+            <div className="mt-3 rounded-xl border border-blue-100 bg-white p-3 text-sm text-blue-900 space-y-1">
+              <p><span className="font-semibold">Merchant:</span> {sessionDetails.dapp?.name ?? 'Unknown'}</p>
+              <p><span className="font-semibold">Recipient:</span> {sessionDetails.recipient}</p>
+              <p><span className="font-semibold">Amount:</span> {sessionDetails.purchaseAmountMist.toLocaleString()} MIST</p>
+              <p><span className="font-semibold">Memo:</span> {sessionDetails.memo ?? 'None'}</p>
+            </div>
+          )}
+          {buyerState && <ResponseBox ok={buyerState.ok} friendly={buyerState.msg} raw={buyerState.raw} />}
+        </FormPanel>
+      </div>
+    </div>
+  )
+}

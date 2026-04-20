@@ -25,6 +25,51 @@ const DEMO_BARS = [
   { name: 'wallet-demo',     value: 18000000, pct: 18 },
 ]
 
+interface PortalDApp {
+  id: string
+  name: string
+  network: 'testnet' | 'mainnet'
+  allowlistMode: 'strict' | 'open'
+  dailyBudgetMist?: number | null
+}
+
+interface PortalUsageSummary {
+  appId: string
+  appName: string
+  totalRequests: number
+  successRequests: number
+  failedRequests: number
+  totalGasBudget: number
+  recentEvents: Array<{
+    id: string
+    endpoint: string
+    status: string
+    gasBudget?: number | null
+    createdAt: string
+  }>
+}
+
+function toUiDApp(dapp: PortalDApp, totalGas?: number): DApp {
+  return {
+    id: dapp.id,
+    name: dapp.name,
+    description: dapp.network,
+    wildcardSponsor: dapp.allowlistMode === 'open',
+    maxGasBudget: dapp.dailyBudgetMist ?? undefined,
+    totalGas,
+  }
+}
+
+function mapEvent(appName: string, event: PortalUsageSummary['recentEvents'][number]): SponsorEvent {
+  return {
+    id: event.id,
+    dapp: appName,
+    gas: event.gasBudget ?? undefined,
+    status: event.status,
+    createdAt: event.createdAt,
+  }
+}
+
 export default function DashboardPage() {
   const { jwt } = useAuth()
   const [usage,    setUsage]    = useState<UsageSummary>({})
@@ -39,30 +84,77 @@ export default function DashboardPage() {
   const gasSeries = usage.gasSeries   ?? seedSpark(14, 5000000, 2000000)
 
   const load = useCallback(async () => {
-    if (!jwt) return
+    if (!jwt) {
+      setIsDemo(true)
+      return
+    }
+
     setIsDemo(false)
-    const [uR, dR, kR] = await Promise.all([
-      apiCall<UsageSummary>('GET', '/v1/usage/summary', undefined, jwt),
-      apiCall<DApp[] | { dapps: DApp[] }>('GET', '/v1/dapps', undefined, jwt),
-      apiCall<{ keys: unknown[] } | unknown[]>('GET', '/v1/keys', undefined, jwt),
-    ])
-    if (uR.ok) setUsage(uR.data)
-    if (dR.ok) {
-      const list = Array.isArray(dR.data) ? dR.data : (dR.data as { dapps: DApp[] }).dapps ?? []
-      setDapps(list)
-      const max = Math.max(...list.map((d) => d.totalGas ?? d.gasUsed ?? 1), 1)
-      setBars(list.slice(0, 6).map((d) => {
-        const v = d.totalGas ?? d.gasUsed ?? 0
-        return { name: d.name ?? d.id, value: v, pct: Math.round((v / max) * 100) }
-      }))
+
+    const appsRes = await apiCall<{ apps?: PortalDApp[] }>('GET', '/v1/portal/apps', undefined, jwt)
+    if (!appsRes.ok) return
+
+    const apps = appsRes.data.apps ?? []
+    if (!apps.length) {
+      setDapps([])
+      setBars([])
+      setEvents([])
+      setUsage({ totalSponsored: 0, totalGasBudget: 0 })
+      setKeyCount(0)
+      return
     }
-    if (kR.ok) {
-      const keys = Array.isArray(kR.data) ? kR.data : (kR.data as { keys: unknown[] }).keys ?? []
-      setKeyCount(keys.length)
-    }
-    if (uR.ok && (uR.data as UsageSummary).events?.length) {
-      setEvents((uR.data as UsageSummary).events!)
-    }
+
+    const usageResponses = await Promise.all(
+      apps.map(async (app) => {
+        const summaryRes = await apiCall<{ summary?: PortalUsageSummary }>(
+          'GET',
+          `/v1/portal/usage/summary?appId=${encodeURIComponent(app.id)}`,
+          undefined,
+          jwt
+        )
+
+        const keysRes = await apiCall<{ apiKeys?: unknown[] }>(
+          'GET',
+          `/v1/portal/apps/${encodeURIComponent(app.id)}/api-keys`,
+          undefined,
+          jwt
+        )
+
+        return {
+          app,
+          summary: summaryRes.ok ? summaryRes.data.summary : undefined,
+          keyCount: keysRes.ok ? (keysRes.data.apiKeys ?? []).length : 0,
+        }
+      })
+    )
+
+    const totalSponsored = usageResponses.reduce((sum, row) => sum + (row.summary?.totalRequests ?? 0), 0)
+    const totalGasBudget = usageResponses.reduce((sum, row) => sum + (row.summary?.totalGasBudget ?? 0), 0)
+    const totalKeys = usageResponses.reduce((sum, row) => sum + row.keyCount, 0)
+
+    const uiApps = usageResponses.map((row) => toUiDApp(row.app, row.summary?.totalGasBudget ?? 0))
+    setDapps(uiApps)
+    setKeyCount(totalKeys)
+    setUsage({ totalSponsored, totalGasBudget })
+
+    const max = Math.max(...usageResponses.map((row) => row.summary?.totalGasBudget ?? 0), 1)
+    setBars(
+      usageResponses.slice(0, 6).map((row) => {
+        const value = row.summary?.totalGasBudget ?? 0
+        return {
+          name: row.app.name,
+          value,
+          pct: Math.round((value / max) * 100),
+        }
+      })
+    )
+
+    const mergedEvents = usageResponses
+      .flatMap((row) => (row.summary?.recentEvents ?? []).map((event) => mapEvent(row.app.name, event)))
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+      .slice(0, 20)
+
+    setEvents(mergedEvents.length ? mergedEvents : DEMO_EVENTS)
   }, [jwt])
 
   useEffect(() => { load() }, [load])

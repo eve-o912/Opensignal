@@ -30,7 +30,7 @@ export default function TopNav({ activePage, onNav, onMenuToggle }: Props) {
         OpenSignal
       </div>
       <div className="hidden md:flex items-center gap-2.5">
-        {['dashboard', 'account'].map((p) => (
+        {['dashboard', 'account', 'checkout'].map((p) => (
           <button
             key={p}
             onClick={() => onNav(p)}

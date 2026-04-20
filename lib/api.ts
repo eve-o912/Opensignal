@@ -1,4 +1,15 @@
-const DEFAULT_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? 'https://opensignal.onrender.com').replace(/\/$/, '')
+function resolveDefaultBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE
+  if (configured) return configured.replace(/\/$/, '')
+
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:10000'
+  }
+
+  return 'https://opensignal.onrender.com'
+}
+
+const DEFAULT_BASE = resolveDefaultBase()
 
 function normalizeBase(base: string): string {
   const trimmed = base.trim()
@@ -38,18 +49,26 @@ export async function apiCall<T = unknown>(
   jwt?: string | null,
   apiKey?: string
 ): Promise<CallResult<T>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (jwt) headers['Authorization'] = `Bearer ${jwt}`
   if (apiKey) headers['x-api-key'] = apiKey
 
   async function call(base: string): Promise<CallResult<T>> {
-    const res = await fetch(base + path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    const json = await res.json().catch(() => ({ error: 'Non-JSON response' }))
-    return { ok: res.ok, status: res.status, data: json }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const res = await fetch(base + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+      const json = await res.json().catch(() => ({ error: 'Non-JSON response' }))
+      return { ok: res.ok, status: res.status, data: json }
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   const base = getBase()

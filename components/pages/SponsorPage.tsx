@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { apiCall } from '@/lib/api'
+import { apiCall, getApiErrorMessage } from '@/lib/api'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
 import Input from '@/components/ui/Input'
@@ -20,7 +20,6 @@ export default function SponsorPage() {
   const [qSender, setQSender] = useState('')
   const [qTxKind, setQTxKind] = useState('')
   const [qApiKey, setQApiKey] = useState('')
-  const [qDapp,   setQDapp]   = useState('')
   const [qLoading, setQLoading] = useState(false)
   const [qState,   setQState]   = useState<CallState | null>(null)
 
@@ -34,29 +33,30 @@ export default function SponsorPage() {
   async function doQuote() {
     setQLoading(true); setQState(null)
     const r = await apiCall('POST', '/v1/sponsor/quote',
-      { sender: qSender, transactionKind: qTxKind, dappId: qDapp },
+      { sender: qSender, transactionKind: qTxKind },
       undefined, qApiKey)
     setQLoading(false)
     const data = r.data as Record<string, unknown>
     if (r.ok) {
-      const gas = (data.gasBudget ?? data.estimatedGas) as number | undefined
+      const quote = (data.quote as Record<string, unknown> | undefined) ?? {}
+      const gas = (quote.gasBudget ?? data.gasBudget ?? data.estimatedGas) as number | undefined
       setQState({ ok: true, msg: `Transaction approved! Estimated gas: ${gas != null ? gas.toLocaleString() + ' MIST' : 'see details below'}. Ready to sponsor.`, raw: data })
     } else {
-      setQState({ ok: false, msg: (data.error as string | undefined) ?? "This transaction was rejected by your app's policy." })
+      setQState({ ok: false, msg: getApiErrorMessage(data, "This transaction was rejected by your app's policy.") })
     }
   }
 
   async function doSign() {
     setSLoading(true); setSState(null)
     const r = await apiCall('POST', '/v1/sponsor/sign',
-      { sender: sSender, transactionKind: sTxKind, ...(sBudget ? { gasBudget: parseInt(sBudget) } : {}) },
+      { sender: sSender, transactionKind: sTxKind, ...(sBudget ? { maxGasBudget: parseInt(sBudget, 10) } : {}) },
       undefined, sApiKey)
     setSLoading(false)
     const data = r.data as Record<string, unknown>
     if (r.ok) {
       setSState({ ok: true, msg: 'Transaction sponsored and signed. The signed bytes are ready — your app can submit them on-chain.', raw: data })
     } else {
-      setSState({ ok: false, msg: (data.error as string | undefined) ?? 'Sponsorship failed. Check your API key and transaction data.' })
+      setSState({ ok: false, msg: getApiErrorMessage(data, 'Sponsorship failed. Check your API key and transaction data.') })
     }
   }
 
@@ -80,8 +80,9 @@ export default function SponsorPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="Your API key" placeholder="os_live_..."
               value={qApiKey} onChange={(e) => setQApiKey(e.target.value)} />
-            <Input label="App ID" placeholder="dapp_..."
-              value={qDapp} onChange={(e) => setQDapp(e.target.value)} />
+            <div className="text-xs text-blue-500 self-end pb-1">
+              App is inferred from your API key.
+            </div>
           </div>
         </div>
         <Button onClick={doQuote} disabled={qLoading || !qSender || !qTxKind || !qApiKey}>
