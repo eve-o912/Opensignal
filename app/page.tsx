@@ -1,7 +1,5 @@
 'use client'
 
-"use client"
-
 import { useState } from 'react'
 import TopNav from '@/components/layout/TopNav'
 import SignalStrip from '@/components/layout/SignalStrip'
@@ -29,7 +27,7 @@ export default function Home() {
   function renderPage() {
     switch (active) {
       case 'dashboard': return <DashboardPage />
-      case 'account':   return <AccountPage />
+      case 'account':   return <AccountPage onNavigate={nav} />
       case 'apps':      return <AppsPage />
       case 'keys':      return <KeysPage />
       case 'sponsor':   return <SponsorPage />

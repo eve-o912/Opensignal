@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+import { Transaction } from '@mysten/sui/transactions'
 import { useAuth } from '@/context/AuthContext'
 import { apiCall, getApiErrorMessage } from '@/lib/api'
 import SectionHeader from '@/components/layout/SectionHeader'
@@ -57,6 +59,7 @@ interface InjectedWalletProvider {
   connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
   getAccounts?: () => Promise<Array<{ address?: string }>>
   signMessage?: (input: { message: string }) => Promise<{ signature?: string }>
+  signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 function getInjectedWalletProviders(): InjectedWalletProvider[] {
@@ -97,6 +100,25 @@ function saveLinkedWallet(sessionKey: string, wallet: LinkedWalletInfo | null) {
   localStorage.setItem(key, JSON.stringify(wallet))
 }
 
+function resolveRpcUrl(network: 'testnet' | 'mainnet'): string {
+  return network === 'mainnet'
+    ? 'https://fullnode.mainnet.sui.io:443'
+    : 'https://fullnode.testnet.sui.io:443'
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
 export default function CheckoutPage() {
   const { jwt } = useAuth()
   const searchParams = useSearchParams()
@@ -123,7 +145,10 @@ export default function CheckoutPage() {
   const [walletLinkLoading, setWalletLinkLoading] = useState(false)
   const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
   const [transactionKind, setTransactionKind] = useState('')
+  const [txBuildLoading, setTxBuildLoading] = useState(false)
+  const [txBuildState, setTxBuildState] = useState<{ ok: boolean; msg: string } | null>(null)
   const [maxGasBudget, setMaxGasBudget] = useState('')
+  const [userSignature, setUserSignature] = useState('')
   const [buyerLoading, setBuyerLoading] = useState(false)
   const [buyerState, setBuyerState] = useState<{ ok: boolean; msg: string; raw?: Record<string, unknown> } | null>(null)
 
@@ -165,6 +190,9 @@ export default function CheckoutPage() {
         setRecipient(r.data.session.recipient)
         setAmount(String(r.data.session.purchaseAmountMist))
         setNetwork(r.data.session.network === 'mainnet' ? 'mainnet' : 'testnet')
+        setTransactionKind('')
+        setUserSignature('')
+        setTxBuildState(null)
 
         const stored = readLinkedWallet(r.data.session.id)
         if (stored) {
@@ -176,6 +204,12 @@ export default function CheckoutPage() {
 
     loadSession()
   }, [sessionId, checkoutToken])
+
+  useEffect(() => {
+    if (!sessionDetails || !sender || transactionKind || txBuildLoading) return
+
+    buildTransactionKindFromIntent()
+  }, [sessionDetails, sender])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -223,6 +257,9 @@ export default function CheckoutPage() {
 
       setLinkedWallet(walletInfo)
       setSender(accountAddress)
+      setTransactionKind('')
+      setUserSignature('')
+      setTxBuildState(null)
       setWalletLinkState({ ok: true, msg: `Wallet linked: ${accountAddress}` })
     } catch (error) {
       setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
@@ -255,6 +292,9 @@ export default function CheckoutPage() {
     if (r.ok) {
       setCheckoutUrl(r.data.checkoutUrl)
       setSessionDetails(r.data.session)
+      setTransactionKind('')
+      setUserSignature('')
+      setTxBuildState(null)
       setMerchantState({
         ok: true,
         msg: 'Checkout session created. Share the link with the customer so they can complete payment without paying gas.',
@@ -265,31 +305,156 @@ export default function CheckoutPage() {
     }
   }
 
+  async function buildTransactionKindFromIntent(): Promise<string | null> {
+    if (!sessionDetails || !sender) return null
+
+    setTxBuildLoading(true)
+    setTxBuildState(null)
+    try {
+      const targetNetwork = sessionDetails.network === 'mainnet' ? 'mainnet' : 'testnet'
+      const client = new SuiJsonRpcClient({ url: resolveRpcUrl(targetNetwork), network: targetNetwork })
+      const amountMist = BigInt(sessionDetails.purchaseAmountMist)
+
+      const coins = await client.getCoins({
+        owner: sender,
+        coinType: '0x2::sui::SUI',
+        limit: 50,
+      })
+
+      const spendCoin = coins.data.find((coin: { balance: string; coinObjectId: string }) => BigInt(coin.balance) >= amountMist)
+      if (!spendCoin) {
+        throw new Error('Linked wallet has insufficient SUI balance for this payment amount.')
+      }
+
+      const tx = new Transaction()
+      tx.setSender(sender)
+
+      const [paymentCoin] = tx.splitCoins(
+        tx.object(spendCoin.coinObjectId),
+        [tx.pure.u64(amountMist.toString())],
+      )
+
+      tx.transferObjects([paymentCoin], tx.pure.address(sessionDetails.recipient))
+
+      const kindBytes = await tx.build({
+        client,
+        onlyTransactionKind: true,
+      })
+
+      const kindBase64 = bytesToBase64(kindBytes)
+      setTransactionKind(kindBase64)
+      setTxBuildState({ ok: true, msg: 'Transaction bytes generated from checkout intent.' })
+      return kindBase64
+    } catch (error) {
+      setTransactionKind('')
+      setTxBuildState({
+        ok: false,
+        msg: error instanceof Error ? error.message : 'Could not build transaction bytes from intent.',
+      })
+      return null
+    } finally {
+      setTxBuildLoading(false)
+    }
+  }
+
+  async function signSponsoredTransactionBytes(bytesBase64: string): Promise<string | null> {
+    if (!sender) return null
+
+    const providers = getInjectedWalletProviders()
+    const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
+    const provider = preferred ?? providers[0]
+
+    if (!provider?.signTransactionBlock) {
+      throw new Error('Connected wallet does not support sponsored transaction signing in this browser.')
+    }
+
+    const chain = `sui:${sessionDetails?.network === 'mainnet' ? 'mainnet' : 'testnet'}`
+    const attempts: Array<Record<string, unknown>> = [
+      { transactionBlock: bytesBase64, account: { address: sender }, chain },
+      { transactionBlock: base64ToBytes(bytesBase64), account: { address: sender }, chain },
+      { transactionBlock: bytesBase64, chain },
+    ]
+
+    for (const input of attempts) {
+      try {
+        const result = await provider.signTransactionBlock(input)
+        const signature = typeof result.signature === 'string'
+          ? result.signature
+          : typeof result.txSignature === 'string'
+            ? String(result.txSignature)
+            : ''
+        if (signature) return signature
+      } catch {
+        // Try next call variant.
+      }
+    }
+
+    throw new Error('Wallet rejected sponsored transaction signing.')
+  }
+
   async function completeCheckout() {
-    if (!sessionId || !checkoutToken) return
+    if (!sessionId || !checkoutToken || !sender) return
 
     setBuyerLoading(true)
     setBuyerState(null)
+    setUserSignature('')
+
+    let kind = transactionKind
+    if (!kind) {
+      const built = await buildTransactionKindFromIntent()
+      if (!built) {
+        setBuyerLoading(false)
+        return
+      }
+      kind = built
+    }
+
     const r = await apiCall<CheckoutSponsorResponse>(
       'POST',
       `/v1/checkout/sessions/${encodeURIComponent(sessionId)}/sponsor`,
       {
         token: checkoutToken,
         sender,
-        transactionKind,
+        transactionKind: kind,
         ...(maxGasBudget ? { maxGasBudget: parseInt(maxGasBudget, 10) } : {}),
       },
     )
-    setBuyerLoading(false)
 
     if (r.ok) {
+      let signedByUser = ''
+      try {
+        if (r.data.transactionBytes) {
+          const signature = await signSponsoredTransactionBytes(r.data.transactionBytes)
+          if (signature) {
+            signedByUser = signature
+            setUserSignature(signature)
+          }
+        }
+      } catch (error) {
+        setBuyerLoading(false)
+        setBuyerState({
+          ok: false,
+          msg: error instanceof Error ? error.message : 'Sponsorship succeeded but wallet signing failed.',
+          raw: {
+            sponsorSignature: r.data.sponsorSignature,
+            transactionBytes: r.data.transactionBytes,
+          },
+        })
+        return
+      }
+
+      setBuyerLoading(false)
       setBuyerState({
         ok: true,
-        msg: 'Payment completed. The transaction was gas-sponsored and signed successfully.',
-        raw: r.data as unknown as Record<string, unknown>,
+        msg: 'Payment intent converted, sponsored by OpenSignal, and signed by the linked wallet.',
+        raw: {
+          ...r.data,
+          userSignature: signedByUser || 'Wallet signature not captured by this provider API',
+        } as Record<string, unknown>,
       })
       setSessionDetails((current) => current ? { ...current, status: 'COMPLETED' } : current)
     } else {
+      setBuyerLoading(false)
       setBuyerState({ ok: false, msg: getApiErrorMessage(r.data, 'Checkout failed. Check the session link and transaction bytes.') })
     }
   }
@@ -358,12 +523,12 @@ export default function CheckoutPage() {
           )}
         </FormPanel>
 
-        <FormPanel step={2} title="Customer checkout" desc="Open the checkout link, sign the transaction from the linked wallet, and let OpenSignal sponsor the gas.">
+        <FormPanel step={2} title="Customer checkout" desc="Open checkout link, auto-build transaction bytes, then sign the sponsored bytes from the linked wallet.">
           <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <p className="text-sm font-semibold text-blue-900">Linked wallet</p>
-                <p className="text-xs text-blue-500">Connect a Sui wallet, prove ownership, and auto-fill the sender.</p>
+                <p className="text-xs text-blue-500">Connect once to auto-fill sender, auto-generate bytes, and sign sponsored transactions.</p>
               </div>
               <Button variant="sm" onClick={linkWallet} disabled={walletLinkLoading}>
                 {walletLinkLoading ? 'Linking…' : linkedWallet ? 'Relink wallet' : 'Link wallet'}
@@ -389,10 +554,34 @@ export default function CheckoutPage() {
             <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
               value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
           </div>
-          <Textarea label="Transaction kind bytes" placeholder="Wallet-generated base64 transaction kind bytes"
-            value={transactionKind} onChange={(e) => setTransactionKind(e.target.value)} />
+          <div className="rounded-xl border border-blue-100 bg-white p-3 mb-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
+                <p className="text-xs text-blue-500">Generated automatically from session intent and linked wallet balance.</p>
+              </div>
+              <Button
+                variant="sm"
+                onClick={buildTransactionKindFromIntent}
+                disabled={txBuildLoading || !sessionDetails || !sender}
+              >
+                {txBuildLoading ? 'Generating…' : transactionKind ? 'Regenerate bytes' : 'Generate bytes'}
+              </Button>
+            </div>
+            {txBuildLoading && <Spinner label="Building transaction kind bytes…" />}
+            {txBuildState && (
+              <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${txBuildState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                {txBuildState.msg}
+              </div>
+            )}
+            {transactionKind && (
+              <pre className="mt-3 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border bg-blue-50 border-blue-100 text-blue-900">
+                {transactionKind}
+              </pre>
+            )}
+          </div>
           <div className="mt-4 flex items-center gap-2 flex-wrap">
-            <Button variant="primary" onClick={completeCheckout} disabled={buyerLoading || !sessionId || !checkoutToken || !sender || !transactionKind}>
+            <Button variant="primary" onClick={completeCheckout} disabled={buyerLoading || txBuildLoading || !sessionId || !checkoutToken || !sender}>
               {buyerLoading ? 'Completing…' : 'Complete checkout'}
             </Button>
             {sessionLoading && <Spinner label="Loading checkout session…" />}
@@ -404,6 +593,12 @@ export default function CheckoutPage() {
               <p><span className="font-semibold">Recipient:</span> {sessionDetails.recipient}</p>
               <p><span className="font-semibold">Amount:</span> {sessionDetails.purchaseAmountMist.toLocaleString()} MIST</p>
               <p><span className="font-semibold">Memo:</span> {sessionDetails.memo ?? 'None'}</p>
+            </div>
+          )}
+          {userSignature && (
+            <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50 p-3 text-xs text-teal-900 break-all">
+              <p className="font-semibold mb-1">User signature</p>
+              <p className="font-mono">{userSignature}</p>
             </div>
           )}
           {buyerState && <ResponseBox ok={buyerState.ok} friendly={buyerState.msg} raw={buyerState.raw} />}

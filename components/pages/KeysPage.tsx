@@ -14,6 +14,27 @@ import Badge from '@/components/ui/Badge'
 import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
 
+interface StoredSecrets {
+  [keyId: string]: string
+}
+
+function readStoredSecrets(): StoredSecrets {
+  if (typeof window === 'undefined') return {}
+  const raw = localStorage.getItem('os_generated_key_secrets')
+  if (!raw) return {}
+
+  try {
+    return JSON.parse(raw) as StoredSecrets
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredSecrets(next: StoredSecrets) {
+  if (typeof window === 'undefined') return
+  localStorage.setItem('os_generated_key_secrets', JSON.stringify(next))
+}
+
 export default function KeysPage() {
   const { jwt } = useAuth()
   const { show } = useToast()
@@ -23,8 +44,14 @@ export default function KeysPage() {
   const [keyName,  setKeyName]  = useState('')
   const [creating, setCreating] = useState(false)
   const [createState, setCreateState] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [latestSecret, setLatestSecret] = useState<{ keyId: string; secret: string } | null>(null)
+  const [storedSecrets, setStoredSecrets] = useState<StoredSecrets>({})
   const [keys,     setKeys]     = useState<ApiKey[]>([])
   const [loading,  setLoading]  = useState(false)
+
+  useEffect(() => {
+    setStoredSecrets(readStoredSecrets())
+  }, [])
 
   const loadApps = useCallback(async () => {
     if (!jwt) return
@@ -69,8 +96,8 @@ export default function KeysPage() {
 
   async function doCreate() {
     if (!selectedAppId) return
-    setCreating(true); setCreateState(null)
-    const r = await apiCall<{ secret?: string }>(
+    setCreating(true); setCreateState(null); setLatestSecret(null)
+    const r = await apiCall<{ secret?: string; apiKey?: { id: string } }>(
       'POST',
       `/v1/portal/apps/${encodeURIComponent(selectedAppId)}/api-keys`,
       { label: keyName || undefined },
@@ -79,10 +106,22 @@ export default function KeysPage() {
     setCreating(false)
     if (r.ok) {
       const createdSecret = r.data.secret
+      const createdKeyId = r.data.apiKey?.id
+
+      if (createdSecret && createdKeyId) {
+        const nextSecrets = {
+          ...storedSecrets,
+          [createdKeyId]: createdSecret,
+        }
+        setStoredSecrets(nextSecrets)
+        writeStoredSecrets(nextSecrets)
+        setLatestSecret({ keyId: createdKeyId, secret: createdSecret })
+      }
+
       setCreateState({
         ok: true,
         msg: createdSecret
-          ? `Key created. Save this secret now: ${createdSecret}`
+          ? 'Key created successfully. Use the copy button to store it safely.'
           : "Key created! Copy it now — it won't be shown in full again.",
       })
       setKeyName('')
@@ -95,8 +134,25 @@ export default function KeysPage() {
   async function revokeKey(id: string) {
     if (!confirm('Revoke this key? It will stop working immediately.')) return
     await apiCall('POST', `/v1/portal/api-keys/${encodeURIComponent(id)}/revoke`, {}, jwt)
+
+    if (storedSecrets[id]) {
+      const nextSecrets = { ...storedSecrets }
+      delete nextSecrets[id]
+      setStoredSecrets(nextSecrets)
+      writeStoredSecrets(nextSecrets)
+    }
+
     show('Key revoked')
     loadKeys()
+  }
+
+  async function copySecret(secret: string) {
+    try {
+      await navigator.clipboard.writeText(secret)
+      show('Key copied to clipboard')
+    } catch {
+      show('Copy failed. Copy manually from the key box.')
+    }
   }
 
   return (
@@ -135,6 +191,13 @@ export default function KeysPage() {
           {creating ? 'Generating…' : 'Generate key'}
         </Button>
         {createState && <ResponseBox ok={createState.ok} friendly={createState.msg} />}
+        {latestSecret && (
+          <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
+            <p className="text-xs font-semibold text-blue-900 mb-2">New key secret</p>
+            <p className="font-mono text-xs text-blue-800 break-all mb-3">{latestSecret.secret}</p>
+            <Button variant="sm" onClick={() => copySecret(latestSecret.secret)}>Copy key</Button>
+          </div>
+        )}
       </FormPanel>
 
       <FormPanel title="Your keys">
@@ -152,6 +215,11 @@ export default function KeysPage() {
               <div>
                 <p className="font-semibold text-sm text-blue-900">{k.name ?? 'Unnamed key'}</p>
                 <p className="font-mono text-xs text-blue-600 mt-0.5">{k.key ?? k.id}</p>
+                {storedSecrets[k.id] && (
+                  <div className="mt-2">
+                    <Button variant="sm" onClick={() => copySecret(storedSecrets[k.id])}>Copy full key</Button>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={k.revoked ? 'err' : 'ok'}>
