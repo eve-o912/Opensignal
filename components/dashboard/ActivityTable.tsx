@@ -11,7 +11,7 @@ export default function ActivityTable({ events, isDemo }: Props) {
         <p className="text-xs text-blue-300 mb-3">Sign in to see your live activity</p>
       )}
 
-      <div className="overflow-x-auto">
+      <div className="max-h-80 overflow-y-auto overflow-x-auto pr-1">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr>

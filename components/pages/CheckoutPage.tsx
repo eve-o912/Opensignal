@@ -56,10 +56,37 @@ interface LinkedWalletInfo {
 interface InjectedWalletProvider {
   name?: string
   features?: Record<string, unknown>
+  accounts?: Array<{ address?: string }>
   connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
   getAccounts?: () => Promise<Array<{ address?: string }>>
   signMessage?: (input: { message: string }) => Promise<{ signature?: string }>
+  signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
   signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+}
+
+function extractSignature(result: Record<string, unknown>): string {
+  if (typeof result.signature === 'string') return result.signature
+  if (typeof result.txSignature === 'string') return String(result.txSignature)
+
+  const signatures = result.signatures
+  if (Array.isArray(signatures) && typeof signatures[0] === 'string') {
+    return signatures[0]
+  }
+
+  return ''
+}
+
+function getWalletSigners(provider: InjectedWalletProvider): Array<(input: Record<string, unknown>) => Promise<Record<string, unknown>>> {
+  const features = (provider.features ?? {}) as Record<string, unknown>
+  const featureSignTransaction = (features['sui:signTransaction'] as { signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransaction
+  const featureSignTransactionBlock = (features['sui:signTransactionBlock'] as { signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransactionBlock
+
+  return [
+    featureSignTransaction,
+    provider.signTransaction,
+    featureSignTransactionBlock,
+    provider.signTransactionBlock,
+  ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
 }
 
 function getInjectedWalletProviders(): InjectedWalletProvider[] {
@@ -139,6 +166,7 @@ export default function CheckoutPage() {
   const [checkoutUrl, setCheckoutUrl] = useState('')
   const [sessionDetails, setSessionDetails] = useState<CheckoutSession | null>(null)
   const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
 
   const [sender, setSender] = useState('')
   const [linkedWallet, setLinkedWallet] = useState<LinkedWalletInfo | null>(null)
@@ -179,10 +207,12 @@ export default function CheckoutPage() {
     async function loadSession() {
       if (!sessionId || !checkoutToken) {
         setSessionDetails(null)
+        setSessionError(null)
         return
       }
 
       setSessionLoading(true)
+      setSessionError(null)
       const r = await apiCall<CheckoutLookupResponse>('GET', `/v1/checkout/sessions/${encodeURIComponent(sessionId)}?token=${encodeURIComponent(checkoutToken)}`)
       setSessionLoading(false)
       if (r.ok) {
@@ -198,6 +228,21 @@ export default function CheckoutPage() {
         if (stored) {
           setLinkedWallet(stored)
           setSender(stored.address)
+        }
+      } else {
+        setSessionDetails(null)
+        setTransactionKind('')
+        setUserSignature('')
+        setTxBuildState(null)
+
+        if (r.status === 410) {
+          setSessionError('This checkout session expired. Create a fresh checkout session and open the new link.')
+        } else if (r.status === 404) {
+          setSessionError('Checkout session not found. The link may be old or invalid.')
+        } else if (r.status === 401) {
+          setSessionError('Invalid checkout token. Create a new checkout session.')
+        } else {
+          setSessionError(getApiErrorMessage(r.data, 'Could not load checkout session.'))
         }
       }
     }
@@ -334,7 +379,11 @@ export default function CheckoutPage() {
         [tx.pure.u64(amountMist.toString())],
       )
 
-      tx.transferObjects([paymentCoin], tx.pure.address(sessionDetails.recipient))
+      tx.moveCall({
+        target: '0x2::transfer::public_transfer',
+        typeArguments: ['0x2::coin::Coin<0x2::sui::SUI>'],
+        arguments: [paymentCoin, tx.pure.address(sessionDetails.recipient)],
+      })
 
       const kindBytes = await tx.build({
         client,
@@ -364,28 +413,33 @@ export default function CheckoutPage() {
     const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
     const provider = preferred ?? providers[0]
 
-    if (!provider?.signTransactionBlock) {
-      throw new Error('Connected wallet does not support sponsored transaction signing in this browser.')
+    const signers = provider ? getWalletSigners(provider) : []
+    if (!provider || signers.length === 0) {
+      throw new Error('Connected wallet does not support transaction signing in this browser. Use a Sui wallet with signTransaction support.')
     }
 
     const chain = `sui:${sessionDetails?.network === 'mainnet' ? 'mainnet' : 'testnet'}`
+    const providerAccount = provider.accounts?.find((account) => account.address === sender) ?? provider.accounts?.[0]
+    const accountInput = providerAccount ?? { address: sender }
+
     const attempts: Array<Record<string, unknown>> = [
-      { transactionBlock: bytesBase64, account: { address: sender }, chain },
-      { transactionBlock: base64ToBytes(bytesBase64), account: { address: sender }, chain },
+      { transaction: bytesBase64, account: accountInput, chain },
+      { transaction: base64ToBytes(bytesBase64), account: accountInput, chain },
+      { transaction: bytesBase64, chain },
+      { transactionBlock: bytesBase64, account: accountInput, chain },
+      { transactionBlock: base64ToBytes(bytesBase64), account: accountInput, chain },
       { transactionBlock: bytesBase64, chain },
     ]
 
-    for (const input of attempts) {
-      try {
-        const result = await provider.signTransactionBlock(input)
-        const signature = typeof result.signature === 'string'
-          ? result.signature
-          : typeof result.txSignature === 'string'
-            ? String(result.txSignature)
-            : ''
-        if (signature) return signature
-      } catch {
-        // Try next call variant.
+    for (const signer of signers) {
+      for (const input of attempts) {
+        try {
+          const result = await signer(input)
+          const signature = extractSignature(result)
+          if (signature) return signature
+        } catch {
+          // Try next signer/variant.
+        }
       }
     }
 
@@ -432,10 +486,12 @@ export default function CheckoutPage() {
         }
       } catch (error) {
         setBuyerLoading(false)
+        setSessionDetails((current) => current ? { ...current, status: 'COMPLETED' } : current)
         setBuyerState({
-          ok: false,
-          msg: error instanceof Error ? error.message : 'Sponsorship succeeded but wallet signing failed.',
+          ok: true,
+          msg: 'Sponsorship was approved and the checkout session is completed. Wallet signing is not supported in this browser, so no user signature was captured.',
           raw: {
+            signingError: error instanceof Error ? error.message : 'Wallet signing unavailable',
             sponsorSignature: r.data.sponsorSignature,
             transactionBytes: r.data.transactionBytes,
           },
@@ -446,7 +502,9 @@ export default function CheckoutPage() {
       setBuyerLoading(false)
       setBuyerState({
         ok: true,
-        msg: 'Payment intent converted, sponsored by OpenSignal, and signed by the linked wallet.',
+        msg: signedByUser
+          ? 'Payment intent converted, sponsored by OpenSignal, and signed by the linked wallet.'
+          : 'Payment intent converted and sponsored by OpenSignal. Wallet signature was not returned by this provider API.',
         raw: {
           ...r.data,
           userSignature: signedByUser || 'Wallet signature not captured by this provider API',
@@ -455,154 +513,167 @@ export default function CheckoutPage() {
       setSessionDetails((current) => current ? { ...current, status: 'COMPLETED' } : current)
     } else {
       setBuyerLoading(false)
+      if (r.status === 410) {
+        setSessionError('This checkout session expired while you were processing it. Create a new session and retry.')
+      } else if (r.status === 409) {
+        setSessionError('This checkout session is already processed. If payment already went through, this is expected.')
+      }
       setBuyerState({ ok: false, msg: getApiErrorMessage(r.data, 'Checkout failed. Check the session link and transaction bytes.') })
     }
   }
 
   return (
     <div className="space-y-4">
-      <SectionHeader
-        eyebrow="Payments"
-        title="Sponsored checkout"
-        sub="Create a merchant checkout session, then let the customer complete the payment from their linked wallet while OpenSignal covers gas."
-      />
+      <div className="w-full lg:w-[95%] lg:ml-auto space-y-4">
+        <SectionHeader
+          eyebrow="Payments"
+          title="Sponsored checkout"
+          sub="Create a merchant checkout session, then let the customer complete the payment from their linked wallet while OpenSignal covers gas."
+        />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
-        <FormPanel step={1} title="Create a checkout session" desc="Merchant backend creates a time-limited payment intent with the recipient and amount locked in.">
-          {!jwt && <p className="text-sm text-blue-400 mb-3">Sign in as a merchant to mint checkout sessions.</p>}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-            <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
-              App
-              <select
-                className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                value={selectedAppId}
-                onChange={(e) => setSelectedAppId(e.target.value)}
-                disabled={!apps.length}
-              >
-                {!apps.length && <option value="">No apps available</option>}
-                {apps.map((app) => (
-                  <option key={app.id} value={app.id}>{app.name}</option>
-                ))}
-              </select>
-            </label>
-            <Input label="Merchant reference" placeholder="order-12345"
-              value={reference} onChange={(e) => setReference(e.target.value)} />
-            <Input label="Recipient address" placeholder="0x..."
-              value={recipient} onChange={(e) => setRecipient(e.target.value)} />
-            <Input label="Amount (MIST)" placeholder="100000000" type="number"
-              value={amount} onChange={(e) => setAmount(e.target.value)} />
-            <Input label="Expires in minutes" placeholder="30" type="number"
-              value={expiresInMinutes} onChange={(e) => setExpiresInMinutes(e.target.value)} />
-            <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
-              Network
-              <select
-                className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                value={network}
-                onChange={(e) => setNetwork(e.target.value === 'mainnet' ? 'mainnet' : 'testnet')}
-              >
-                <option value="testnet">testnet</option>
-                <option value="mainnet">mainnet</option>
-              </select>
-            </label>
+        {sessionError && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 mb-4">
+            {sessionError}
           </div>
-          <Textarea label="Memo (optional)" placeholder="Subscription, one-time purchase, etc."
-            value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <div className="mt-4 flex items-center gap-2 flex-wrap">
-            <Button variant="primary" onClick={createCheckoutSession} disabled={merchantLoading || !jwt || !selectedAppId || !recipient || !amount}>
-              {merchantLoading ? 'Creating…' : 'Create checkout session'}
-            </Button>
-            {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
-          </div>
-          {merchantLoading && <Spinner label="Creating checkout session…" />}
-          {merchantState && <ResponseBox ok={merchantState.ok} friendly={merchantState.msg} raw={merchantState.raw} />}
-          {publicCheckoutLink && (
-            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 break-all">
-              <p className="font-semibold mb-1">Checkout link</p>
-              <a href={publicCheckoutLink} className="underline">{publicCheckoutLink}</a>
-            </div>
-          )}
-        </FormPanel>
+        )}
 
-        <FormPanel step={2} title="Customer checkout" desc="Open checkout link, auto-build transaction bytes, then sign the sponsored bytes from the linked wallet.">
-          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-semibold text-blue-900">Linked wallet</p>
-                <p className="text-xs text-blue-500">Connect once to auto-fill sender, auto-generate bytes, and sign sponsored transactions.</p>
-              </div>
-              <Button variant="sm" onClick={linkWallet} disabled={walletLinkLoading}>
-                {walletLinkLoading ? 'Linking…' : linkedWallet ? 'Relink wallet' : 'Link wallet'}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+          <FormPanel step={1} title="Create a checkout session" desc="Merchant backend creates a time-limited payment intent with the recipient and amount locked in.">
+            {!jwt && <p className="text-sm text-blue-400 mb-3">Sign in as a merchant to mint checkout sessions.</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+                App
+                <select
+                  className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  value={selectedAppId}
+                  onChange={(e) => setSelectedAppId(e.target.value)}
+                  disabled={!apps.length}
+                >
+                  {!apps.length && <option value="">No apps available</option>}
+                  {apps.map((app) => (
+                    <option key={app.id} value={app.id}>{app.name}</option>
+                  ))}
+                </select>
+              </label>
+              <Input label="Merchant reference" placeholder="order-12345"
+                value={reference} onChange={(e) => setReference(e.target.value)} />
+              <Input label="Recipient address" placeholder="0x..."
+                value={recipient} onChange={(e) => setRecipient(e.target.value)} />
+              <Input label="Amount (MIST)" placeholder="100000000" type="number"
+                value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Input label="Expires in minutes" placeholder="30" type="number"
+                value={expiresInMinutes} onChange={(e) => setExpiresInMinutes(e.target.value)} />
+              <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+                Network
+                <select
+                  className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  value={network}
+                  onChange={(e) => setNetwork(e.target.value === 'mainnet' ? 'mainnet' : 'testnet')}
+                >
+                  <option value="testnet">testnet</option>
+                  <option value="mainnet">mainnet</option>
+                </select>
+              </label>
+            </div>
+            <Textarea label="Memo (optional)" placeholder="Subscription, one-time purchase, etc."
+              value={memo} onChange={(e) => setMemo(e.target.value)} />
+            <div className="mt-4 flex items-center gap-2 flex-wrap">
+              <Button variant="primary" onClick={createCheckoutSession} disabled={merchantLoading || !jwt || !selectedAppId || !recipient || !amount}>
+                {merchantLoading ? 'Creating…' : 'Create checkout session'}
               </Button>
+              {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
             </div>
-            {linkedWallet && (
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <Badge variant="ok">{linkedWallet.provider}</Badge>
-                <span className="text-xs text-blue-900 font-mono">{linkedWallet.address}</span>
+            {merchantLoading && <Spinner label="Creating checkout session…" />}
+            {merchantState && <ResponseBox ok={merchantState.ok} friendly={merchantState.msg} raw={merchantState.raw} />}
+            {publicCheckoutLink && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 break-all">
+                <p className="font-semibold mb-1">Checkout link</p>
+                <a href={publicCheckoutLink} className="underline">{publicCheckoutLink}</a>
               </div>
             )}
-            {walletLinkState && (
-              <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${walletLinkState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                {walletLinkState.msg}
+          </FormPanel>
+
+          <FormPanel step={2} title="Customer checkout" desc="Open checkout link, auto-build transaction bytes, then sign the sponsored bytes from the linked wallet.">
+            <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Linked wallet</p>
+                  <p className="text-xs text-blue-500">Connect once to auto-fill sender, auto-generate bytes, and sign sponsored transactions.</p>
+                </div>
+                <Button variant="sm" onClick={linkWallet} disabled={walletLinkLoading}>
+                  {walletLinkLoading ? 'Linking…' : linkedWallet ? 'Relink wallet' : 'Link wallet'}
+                </Button>
               </div>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-            <Input label="Checkout session ID" value={sessionId} readOnly placeholder="Generated from merchant flow" />
-            <Input label="Checkout token" value={checkoutToken} readOnly placeholder="Generated from merchant flow" />
-            <Input label="Linked wallet address" placeholder="0x..."
-              value={sender} onChange={(e) => setSender(e.target.value)} />
-            <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
-              value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
-          </div>
-          <div className="rounded-xl border border-blue-100 bg-white p-3 mb-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
-                <p className="text-xs text-blue-500">Generated automatically from session intent and linked wallet balance.</p>
+              {linkedWallet && (
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <Badge variant="ok">{linkedWallet.provider}</Badge>
+                  <span className="text-xs text-blue-900 font-mono">{linkedWallet.address}</span>
+                </div>
+              )}
+              {walletLinkState && (
+                <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${walletLinkState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {walletLinkState.msg}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <Input label="Checkout session ID" value={sessionId} readOnly placeholder="Generated from merchant flow" />
+              <Input label="Checkout token" value={checkoutToken} readOnly placeholder="Generated from merchant flow" />
+              <Input label="Linked wallet address" placeholder="0x..."
+                value={sender} onChange={(e) => setSender(e.target.value)} />
+              <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
+                value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
+            </div>
+            <div className="rounded-xl border border-blue-100 bg-white p-3 mb-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
+                  <p className="text-xs text-blue-500">Generated automatically from session intent and linked wallet balance.</p>
+                </div>
+                <Button
+                  variant="sm"
+                  onClick={buildTransactionKindFromIntent}
+                  disabled={txBuildLoading || !sessionDetails || !sender}
+                >
+                  {txBuildLoading ? 'Generating…' : transactionKind ? 'Regenerate bytes' : 'Generate bytes'}
+                </Button>
               </div>
-              <Button
-                variant="sm"
-                onClick={buildTransactionKindFromIntent}
-                disabled={txBuildLoading || !sessionDetails || !sender}
-              >
-                {txBuildLoading ? 'Generating…' : transactionKind ? 'Regenerate bytes' : 'Generate bytes'}
+              {txBuildLoading && <Spinner label="Building transaction kind bytes…" />}
+              {txBuildState && (
+                <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${txBuildState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {txBuildState.msg}
+                </div>
+              )}
+              {transactionKind && (
+                <pre className="mt-3 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border bg-blue-50 border-blue-100 text-blue-900">
+                  {transactionKind}
+                </pre>
+              )}
+            </div>
+            <div className="mt-4 flex items-center gap-2 flex-wrap">
+              <Button variant="primary" onClick={completeCheckout} disabled={buyerLoading || txBuildLoading || !sessionId || !checkoutToken || !sender || !!sessionError || sessionDetails?.status !== 'ACTIVE'}>
+                {buyerLoading ? 'Completing…' : 'Complete checkout'}
               </Button>
+              {sessionLoading && <Spinner label="Loading checkout session…" />}
+              {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
             </div>
-            {txBuildLoading && <Spinner label="Building transaction kind bytes…" />}
-            {txBuildState && (
-              <div className={`mt-3 rounded-xl px-3 py-2 text-sm border ${txBuildState.ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                {txBuildState.msg}
+            {sessionDetails && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-white p-3 text-sm text-blue-900 space-y-1">
+                <p><span className="font-semibold">Merchant:</span> {sessionDetails.dapp?.name ?? 'Unknown'}</p>
+                <p><span className="font-semibold">Recipient:</span> {sessionDetails.recipient}</p>
+                <p><span className="font-semibold">Amount:</span> {sessionDetails.purchaseAmountMist.toLocaleString()} MIST</p>
+                <p><span className="font-semibold">Memo:</span> {sessionDetails.memo ?? 'None'}</p>
               </div>
             )}
-            {transactionKind && (
-              <pre className="mt-3 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border bg-blue-50 border-blue-100 text-blue-900">
-                {transactionKind}
-              </pre>
+            {userSignature && (
+              <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50 p-3 text-xs text-teal-900 break-all">
+                <p className="font-semibold mb-1">User signature</p>
+                <p className="font-mono">{userSignature}</p>
+              </div>
             )}
-          </div>
-          <div className="mt-4 flex items-center gap-2 flex-wrap">
-            <Button variant="primary" onClick={completeCheckout} disabled={buyerLoading || txBuildLoading || !sessionId || !checkoutToken || !sender}>
-              {buyerLoading ? 'Completing…' : 'Complete checkout'}
-            </Button>
-            {sessionLoading && <Spinner label="Loading checkout session…" />}
-            {sessionDetails && <Badge variant={sessionDetails.status === 'COMPLETED' ? 'ok' : 'warn'}>{sessionDetails.status}</Badge>}
-          </div>
-          {sessionDetails && (
-            <div className="mt-3 rounded-xl border border-blue-100 bg-white p-3 text-sm text-blue-900 space-y-1">
-              <p><span className="font-semibold">Merchant:</span> {sessionDetails.dapp?.name ?? 'Unknown'}</p>
-              <p><span className="font-semibold">Recipient:</span> {sessionDetails.recipient}</p>
-              <p><span className="font-semibold">Amount:</span> {sessionDetails.purchaseAmountMist.toLocaleString()} MIST</p>
-              <p><span className="font-semibold">Memo:</span> {sessionDetails.memo ?? 'None'}</p>
-            </div>
-          )}
-          {userSignature && (
-            <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50 p-3 text-xs text-teal-900 break-all">
-              <p className="font-semibold mb-1">User signature</p>
-              <p className="font-mono">{userSignature}</p>
-            </div>
-          )}
-          {buyerState && <ResponseBox ok={buyerState.ok} friendly={buyerState.msg} raw={buyerState.raw} />}
-        </FormPanel>
+            {buyerState && <ResponseBox ok={buyerState.ok} friendly={buyerState.msg} raw={buyerState.raw} />}
+          </FormPanel>
+        </div>
       </div>
     </div>
   )
