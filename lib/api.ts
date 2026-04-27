@@ -6,7 +6,7 @@ function resolveDefaultBase(): string {
     return 'http://localhost:10000'
   }
 
-  return 'https://opensignal.onrender.com'
+  return 'https://opensignal-gas-station.onrender.com'
 }
 
 const DEFAULT_BASE = resolveDefaultBase()
