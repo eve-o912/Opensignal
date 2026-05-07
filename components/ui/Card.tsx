@@ -9,13 +9,13 @@ interface Props {
 export default function Card({ children, className = '', dark = false }: Props) {
   if (dark) {
     return (
-      <div className={`bg-[#042C53] rounded-[18px] p-5 ${className}`}>
+      <div className={`bg-gray-900 border border-gray-700 rounded-[18px] p-5 text-white ${className}`}>
         {children}
       </div>
     )
   }
   return (
-    <div className={`bg-white border border-blue-100 rounded-[18px] p-5 ${className}`}>
+    <div className={`bg-gray-900 border border-gray-700 rounded-[18px] p-5 text-white ${className}`}>
       {children}
     </div>
   )

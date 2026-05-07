@@ -54,9 +54,9 @@ export default function SparkCard({ id, label, value, data, labels, color }: Pro
   }, [data, labels, color])
 
   return (
-    <div className="bg-white border border-blue-100 rounded-2xl p-4">
-      <p className="text-xs text-blue-400 mb-1">{label}</p>
-      <p className="text-lg font-bold text-blue-900 mb-2">{value}</p>
+    <div className="bg-gray-900 border border-gray-700 rounded-2xl p-4">
+      <p className="text-xs text-gray-400 mb-1">{label}</p>
+      <p className="text-lg font-bold text-white mb-2">{value}</p>
       <canvas ref={canvasRef} id={id} style={{ height: 55, display: 'block', width: '100%' }} />
     </div>
   )

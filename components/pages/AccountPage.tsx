@@ -88,7 +88,7 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
       />
 
       {jwt && (
-        <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50 px-3.5 py-3 text-sm text-teal-900">
+        <div className="mb-3 rounded-xl border border-green-700 bg-gray-900 px-3.5 py-3 text-sm text-green-100">
           Signed in successfully. Continue with app setup from the Apps or Checkout sections.
         </div>
       )}

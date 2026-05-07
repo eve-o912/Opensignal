@@ -39,17 +39,17 @@ export default function SettingsPage() {
       </FormPanel>
 
       <FormPanel title="About">
-        <p className="text-sm text-blue-400 leading-relaxed mb-3">
+        <p className="text-sm text-gray-400 leading-relaxed mb-3">
           OpenSignal is a Sui gas sponsorship platform. It accepts prebuilt transaction kind bytes,
           validates policy, and sponsors gas on behalf of your users.
         </p>
-        <p className="text-sm text-blue-400 leading-relaxed mb-4">
+        <p className="text-sm text-gray-400 leading-relaxed mb-4">
           Built for developers who want to remove native gas handling from their dApp integration path
           without changing on-chain execution.
         </p>
         <div className="flex gap-2 flex-wrap">
           {['Sui network', 'Prisma persistence', 'JWT auth', 'Policy engine'].map((tag) => (
-            <span key={tag} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full border border-blue-100">
+            <span key={tag} className="text-xs bg-gray-900 text-gray-300 px-3 py-1 rounded-full border border-gray-700">
               {tag}
             </span>
           ))}

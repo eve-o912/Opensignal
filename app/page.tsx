@@ -37,10 +37,8 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <TopNav activePage={active} onNav={nav} onMenuToggle={() => setMobileMenuOpen((v) => !v)} />
-      <SignalStrip />
-      
+    <div className="min-h-screen flex flex-col bg-black text-white">
+      <TopNav activePage={active} onNav={nav} onMenuToggle={() => setMobileMenuOpen((v) => !v)} /> 
 
       <div className="flex flex-1 min-w-0">
         <Sidebar

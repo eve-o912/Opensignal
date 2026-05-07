@@ -164,7 +164,7 @@ export default function DashboardPage() {
   const kpiDapps = isDemo ? '—' : dapps.length.toString()
   const kpiKeys  = isDemo ? '—' : keyCount.toString()
 
-  
+
   return (
     <div className="w-full">
       <SectionHeader
@@ -172,7 +172,7 @@ export default function DashboardPage() {
         title="Your signal, at a glance"
         sub="Real-time sponsorship data across all your apps — refreshed on demand."
       />
-      <Pipeline />
+     
       <KpiGrid txns={kpiTxns} gas={kpiGas} dapps={kpiDapps} keys={kpiKeys} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         <SparkCard

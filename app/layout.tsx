@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="bg-[#f4f8fd] antialiased">
+      <body className="bg-black text-white antialiased">
         <AuthProvider>
           <ToastProvider>
             {children}
