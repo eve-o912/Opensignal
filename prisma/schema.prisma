@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String?
+  googleId        String?   @unique
+  name            String?
+  emailVerifiedAt  DateTime?
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  dapps    Dapp[]
+  sessions Session[]
+}
+
+model Dapp {
+  id              String   @id @default(cuid())
+  ownerId         String
+  name            String
+  network         String   @default("testnet")
+  dailyBudgetMist Int      @default(500000000)
+  allowlistMode   String   @default("strict")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  owner             User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  apiKeys           ApiKey[]
+  sponsorshipEvents SponsorshipEvent[]
+
+  @@unique([ownerId, name])
+}
+
+model ApiKey {
+  id         String       @id @default(cuid())
+  dappId     String
+  label      String?
+  keyPrefix  String
+  keyHash    String       @unique
+  status     ApiKeyStatus @default(ACTIVE)
+  lastUsedAt DateTime?
+  createdAt  DateTime     @default(now())
+  revokedAt  DateTime?
+
+  dapp Dapp @relation(fields: [dappId], references: [id], onDelete: Cascade)
+
+  @@index([dappId])
+}
+
+model SponsorshipEvent {
+  id                 String   @id @default(cuid())
+  dappId             String
+  endpoint           String
+  status             String
+  errorCode          String?
+  gasBudget          Int?
+  purchaseAmountMist Int?
+  recipient          String?
+  latencyMs          Int?
+  createdAt          DateTime @default(now())
+
+  dapp Dapp @relation(fields: [dappId], references: [id], onDelete: Cascade)
+
+  @@index([dappId, createdAt])
+}

@@ -46,8 +46,8 @@ export default function Sidebar({ active, onNav, mobileOpen = false, onCloseMobi
             }}
             className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm w-full text-left transition-colors mb-0.5 cursor-pointer ${
               active === item.id
-                ? 'bg-gray-800 text-white'
-                : 'text-gray-400 hover:bg-gray-900 hover:text-white'
+                ? 'bg-black text-white'
+                : 'text-gray-400 hover:bg-white hover:text-black'
             }`}
           >
             {item.icon}
@@ -60,7 +60,7 @@ export default function Sidebar({ active, onNav, mobileOpen = false, onCloseMobi
 
   return (
     <>
-      <aside className="hidden md:flex flex-col w-52 shrink-0 bg-gray-900 border-r border-gray-800 px-2.5 py-4">
+      <aside className="hidden md:flex flex-col w-60 shrink-0 bg-black border-r border-gray-800 px-2.5 py-4">
         {renderItems()}
       </aside>
 

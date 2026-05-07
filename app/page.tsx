@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
 import TopNav from '@/components/layout/TopNav'
 import SignalStrip from '@/components/layout/SignalStrip'
 import Sidebar from '@/components/layout/Sidebar'
-import HeroCanvas from '@/components/dashboard/HeroCanvas'
+import LandingPage from '@/components/pages/LandingPage'
 import DashboardPage from '@/components/pages/DashboardPage'
 import AccountPage from '@/components/pages/AccountPage'
 import AppsPage from '@/components/pages/AppsPage'
@@ -16,6 +18,8 @@ import SettingsPage from '@/components/pages/SettingsPage'
 type Page = 'dashboard' | 'account' | 'apps' | 'keys' | 'sponsor' | 'checkout' | 'settings'
 
 export default function Home() {
+  const { jwt } = useAuth()
+  const router = useRouter()
   const [active, setActive] = useState<Page>('dashboard')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -36,9 +40,20 @@ export default function Home() {
     }
   }
 
+  // Show landing page if not authenticated
+  if (!jwt) {
+    return (
+      <LandingPage
+        onSignUp={() => router.push('/register')}
+        onSignIn={() => router.push('/login')}
+      />
+    )
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-black text-white">
-      <TopNav activePage={active} onNav={nav} onMenuToggle={() => setMobileMenuOpen((v) => !v)} /> 
+      <TopNav activePage={active} onNav={nav} onMenuToggle={() => setMobileMenuOpen((v) => !v)} />
+      <SignalStrip />
 
       <div className="flex flex-1 min-w-0">
         <Sidebar

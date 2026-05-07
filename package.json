@@ -10,8 +10,11 @@
   },
   "dependencies": {
     "@mysten/sui": "^2.16.0",
+    "@prisma/client": "^6.16.2",
     "autoprefixer": "^10.4.27",
+    "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
+    "google-auth-library": "^10.6.2",
     "next": "15.5.15",
     "postcss": "^8.5.9",
     "react": "19.2.4",
@@ -26,6 +29,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "prisma": "^6.16.2",
     "typescript": "^5"
   }
 }
