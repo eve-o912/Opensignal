@@ -40,7 +40,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col bg-slate-50">
       <TopNav activePage={active} onNav={nav} onMenuToggle={() => setMobileMenuOpen((v) => !v)} />
       <SignalStrip />
-      <HeroCanvas />
+      
 
       <div className="flex flex-1 min-w-0">
         <Sidebar

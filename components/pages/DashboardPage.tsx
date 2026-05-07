@@ -164,6 +164,7 @@ export default function DashboardPage() {
   const kpiDapps = isDemo ? '—' : dapps.length.toString()
   const kpiKeys  = isDemo ? '—' : keyCount.toString()
 
+  
   return (
     <div className="w-full">
       <SectionHeader
