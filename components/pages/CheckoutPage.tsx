@@ -278,6 +278,7 @@ export default function CheckoutPage() {
 
     const nonce = Date.now().toString()
     const message = `OpenSignal wallet link\nSession: ${sessionDetails?.id ?? sessionId ?? 'merchant-flow'}\nAddress: ${accountAddress}\nNonce: ${nonce}`
+    const messageBytes = new TextEncoder().encode(message)
 
     const signMessage = getWalletMessageSigner(provider)
     if (!signMessage) {
@@ -285,7 +286,7 @@ export default function CheckoutPage() {
     }
 
     const signatureResult = await signMessage({
-      message,
+      message: messageBytes,
       account: provider.accounts?.[0] ?? { address: accountAddress },
       chain: `sui:${network}`,
     })

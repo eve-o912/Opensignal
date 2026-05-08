@@ -99,6 +99,7 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
     const nonce = Date.now().toString()
     const message = `Sign in to OpenSignal\nAddress: ${accountAddress}\nNonce: ${nonce}`
+    const messageBytes = new TextEncoder().encode(message)
 
     const signMessage = getWalletMessageSigner(provider)
     if (!signMessage) {
@@ -106,7 +107,7 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
     }
 
     const signatureResult = await signMessage({
-      message,
+      message: messageBytes,
       account: provider.accounts?.[0] ?? { address: accountAddress },
       chain: 'sui:testnet',
     })
