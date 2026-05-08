@@ -25,7 +25,7 @@ interface AccountPageProps {
 
 export default function AccountPage({ onNavigate }: AccountPageProps) {
   const { jwt, setJwt } = useAuth()
-  const { show }   = useToast()
+  const { show } = useToast()
 
   const [suEmail,   setSuEmail]   = useState('')
   const [suPass,    setSuPass]    = useState('')
@@ -38,9 +38,9 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
   const [liState,   setLiState]   = useState<{ ok: boolean; msg: string } | null>(null)
   const [liLoading, setLiLoading] = useState(false)
 
-  const [walletLoading, setWalletLoading] = useState(false)
-  const [walletState, setWalletState] = useState<{ ok: boolean; msg: string } | null>(null)
-  const [walletProviders, setWalletProviders] = useState<InjectedWalletProvider[]>([])
+  const [walletLoading,    setWalletLoading]    = useState(false)
+  const [walletState,      setWalletState]      = useState<{ ok: boolean; msg: string } | null>(null)
+  const [walletProviders,  setWalletProviders]  = useState<InjectedWalletProvider[]>([])
   const [walletPickerOpen, setWalletPickerOpen] = useState(false)
   const [selectedWalletIndex, setSelectedWalletIndex] = useState(0)
 
@@ -56,14 +56,14 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
     loadWallets()
     const intervalId = window.setInterval(loadWallets, 1500)
-      window.addEventListener('focus', loadWallets)
-      document.addEventListener('visibilitychange', loadWallets)
+    window.addEventListener('focus', loadWallets)
+    document.addEventListener('visibilitychange', loadWallets)
 
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
-        window.removeEventListener('focus', loadWallets)
-        document.removeEventListener('visibilitychange', loadWallets)
+      window.removeEventListener('focus', loadWallets)
+      document.removeEventListener('visibilitychange', loadWallets)
     }
   }, [])
 
@@ -93,7 +93,8 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
   async function performWalletLogin(provider: InjectedWalletProvider) {
     const accountAddress = await connectWalletAndGetAddress(provider)
 
-    if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
+    // Sui addresses: 0x + exactly 64 hex characters (32 bytes)
+    if (!/^0x[a-fA-F0-9]{64}$/.test(accountAddress)) {
       throw new Error('Invalid wallet address format received from wallet.')
     }
 
@@ -174,63 +175,63 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
   }
 
   async function doLogin() {
-      setLiLoading(true); setLiState(null)
-      const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
-      setLiLoading(false)
-      if (r.ok && r.data.token) {
-        setJwt(r.data.token)
-        setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
-        show('Signed in successfully')
-      } else {
-        setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
-      }
+    setLiLoading(true); setLiState(null)
+    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
+    setLiLoading(false)
+    if (r.ok && r.data.token) {
+      setJwt(r.data.token)
+      setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
+      show('Signed in successfully')
+    } else {
+      setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
     }
-
-    async function doWalletLogin() {
-      setWalletState(null)
-      if (walletProviders.length > 1) {
-        setWalletPickerOpen(true)
-        return
-      }
-
-      const provider = walletProviders[0]
-      if (!provider) {
-        setWalletState({ ok: false, msg: 'No Sui wallet detected. Install Slush, refresh the page, and allow the extension on this site.' })
-        return
-      }
-
-      setWalletLoading(true)
-      try {
-        await performWalletLogin(provider)
-      } catch (error) {
-        setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
-        console.error('Wallet login error:', error)
-      } finally {
-        setWalletLoading(false)
-        setWalletPickerOpen(false)
-      }
   }
 
-    async function confirmSelectedWallet() {
-      const provider = walletProviders[selectedWalletIndex] ?? walletProviders[0]
-      if (!provider) {
-        setWalletPickerOpen(false)
-        return
-      }
-
-      setWalletLoading(true)
-      setWalletPickerOpen(false)
-      setWalletState(null)
-
-      try {
-        await performWalletLogin(provider)
-      } catch (error) {
-        setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
-        console.error('Wallet login error:', error)
-      } finally {
-        setWalletLoading(false)
-      }
+  async function doWalletLogin() {
+    setWalletState(null)
+    if (walletProviders.length > 1) {
+      setWalletPickerOpen(true)
+      return
     }
+
+    const provider = walletProviders[0]
+    if (!provider) {
+      setWalletState({ ok: false, msg: 'No Sui wallet detected. Install Slush, refresh the page, and allow the extension on this site.' })
+      return
+    }
+
+    setWalletLoading(true)
+    try {
+      await performWalletLogin(provider)
+    } catch (error) {
+      setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
+      console.error('Wallet login error:', error)
+    } finally {
+      setWalletLoading(false)
+      setWalletPickerOpen(false)
+    }
+  }
+
+  async function confirmSelectedWallet() {
+    const provider = walletProviders[selectedWalletIndex] ?? walletProviders[0]
+    if (!provider) {
+      setWalletPickerOpen(false)
+      return
+    }
+
+    setWalletLoading(true)
+    setWalletPickerOpen(false)
+    setWalletState(null)
+
+    try {
+      await performWalletLogin(provider)
+    } catch (error) {
+      setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
+      console.error('Wallet login error:', error)
+    } finally {
+      setWalletLoading(false)
+    }
+  }
 
   return (
     <div>

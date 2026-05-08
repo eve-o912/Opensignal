@@ -1,3 +1,5 @@
+export const DEFAULT_BASE = resolveDefaultBase()
+
 function resolveDefaultBase(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE
   if (configured) return configured.replace(/\/$/, '')
@@ -9,14 +11,11 @@ function resolveDefaultBase(): string {
   return 'https://opensignal-gas-station.onrender.com'
 }
 
-const DEFAULT_BASE = resolveDefaultBase()
-
 function normalizeBase(base: string): string {
-  const trimmed = base.trim()
-  return trimmed.replace(/\/$/, '')
+  return base.trim().replace(/\/$/, '')
 }
 
-function getBase(): string {
+export function getBase(): string {
   if (typeof window === 'undefined') return DEFAULT_BASE
   const stored = localStorage.getItem('os_base_url')
   return stored ? normalizeBase(stored) : DEFAULT_BASE
@@ -56,7 +55,10 @@ export async function apiCall<T = unknown>(
 
   async function call(base: string): Promise<CallResult<T>> {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
+    const timeout = setTimeout(
+      () => controller.abort(new Error('Request timed out after 15 seconds')),
+      15000
+    )
     try {
       const res = await fetch(base + path, {
         method,
@@ -66,6 +68,11 @@ export async function apiCall<T = unknown>(
       })
       const json = await res.json().catch(() => ({ error: 'Non-JSON response' }))
       return { ok: res.ok, status: res.status, data: json }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        return { ok: false, status: 0, data: { error: 'Request timed out. Please try again.' } as T }
+      }
+      throw e
     } finally {
       clearTimeout(timeout)
     }

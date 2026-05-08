@@ -1,19 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-
-function resolveDefaultBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_BASE
-  if (configured) return configured.replace(/\/$/, '')
-
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-    return 'http://localhost:10000'
-  }
-
-  return 'https://opensignal.onrender.com'
-}
-
-const DEFAULT_BASE_URL = resolveDefaultBaseUrl()
+import { DEFAULT_BASE, getBase } from '@/lib/api'
 
 interface AuthCtx {
   jwt: string | null
@@ -25,19 +13,19 @@ interface AuthCtx {
 const AuthContext = createContext<AuthCtx>({
   jwt: null,
   setJwt: () => {},
-  baseUrl: DEFAULT_BASE_URL,
+  baseUrl: DEFAULT_BASE,
   setBaseUrl: () => {},
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [jwt, setJwt] = useState<string | null>(null)
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE)
 
   useEffect(() => {
     const token = localStorage.getItem('os_jwt')
-    const stored = localStorage.getItem('os_base_url')
     if (token) setJwt(token)
-    if (stored) setBaseUrl(stored.replace(/\/$/, ''))
+    // Use the same resolution logic as api.ts to stay in sync
+    setBaseUrl(getBase())
   }, [])
 
   useEffect(() => {
@@ -48,12 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [jwt])
 
-  useEffect(() => {
-    localStorage.setItem('os_base_url', baseUrl.replace(/\/$/, ''))
-  }, [baseUrl])
+  function handleSetBaseUrl(u: string) {
+    const normalized = u.trim().replace(/\/$/, '')
+    localStorage.setItem('os_base_url', normalized)
+    setBaseUrl(normalized)
+  }
 
   return (
-    <AuthContext.Provider value={{ jwt, setJwt, baseUrl, setBaseUrl }}>
+    <AuthContext.Provider value={{ jwt, setJwt, baseUrl, setBaseUrl: handleSetBaseUrl }}>
       {children}
     </AuthContext.Provider>
   )
