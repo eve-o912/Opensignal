@@ -5,10 +5,10 @@ import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { apiCall, getApiErrorMessage } from '@/lib/api'
 import {
-  getInjectedWalletNames,
   waitForInjectedWalletProviders,
   connectWalletAndGetAddress,
   getWalletMessageSigner,
+  type InjectedWalletProvider,
 } from '@/lib/wallet'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
@@ -16,6 +16,7 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
+import WalletPickerDialog from '@/components/ui/WalletPickerDialog'
 
 
 interface AccountPageProps {
@@ -39,30 +40,80 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
   const [walletLoading, setWalletLoading] = useState(false)
   const [walletState, setWalletState] = useState<{ ok: boolean; msg: string } | null>(null)
-  const [walletNames, setWalletNames] = useState<string[]>([])
+  const [walletProviders, setWalletProviders] = useState<InjectedWalletProvider[]>([])
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false)
+  const [selectedWalletIndex, setSelectedWalletIndex] = useState(0)
 
   useEffect(() => {
     let cancelled = false
 
-    const refreshWallets = () => {
+    async function loadWallets() {
+      const providers = await waitForInjectedWalletProviders(1000)
       if (cancelled) return
-      setWalletNames(getInjectedWalletNames())
+      setWalletProviders(providers)
+      setSelectedWalletIndex((current) => Math.min(current, Math.max(providers.length - 1, 0)))
     }
 
-    refreshWallets()
-    const intervalId = window.setInterval(refreshWallets, 1000)
-    window.addEventListener('focus', refreshWallets)
-    document.addEventListener('visibilitychange', refreshWallets)
+    loadWallets()
+    const intervalId = window.setInterval(loadWallets, 1500)
+      window.addEventListener('focus', loadWallets)
+      document.addEventListener('visibilitychange', loadWallets)
 
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
-      window.removeEventListener('focus', refreshWallets)
-      document.removeEventListener('visibilitychange', refreshWallets)
+        window.removeEventListener('focus', loadWallets)
+        document.removeEventListener('visibilitychange', loadWallets)
     }
   }, [])
 
-  const walletDetected = walletNames.length > 0
+  const walletDetected = walletProviders.length > 0
+
+  async function performWalletLogin(provider: InjectedWalletProvider) {
+    const accountAddress = await connectWalletAndGetAddress(provider)
+
+    if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
+      throw new Error('Invalid wallet address format received from wallet.')
+    }
+
+    const nonce = Date.now().toString()
+    const message = `Sign in to OpenSignal\nAddress: ${accountAddress}\nNonce: ${nonce}`
+
+    const signMessage = getWalletMessageSigner(provider)
+    if (!signMessage) {
+      throw new Error('This wallet does not support message signing.')
+    }
+
+    const signatureResult = await signMessage({
+      message,
+      account: provider.accounts?.[0] ?? { address: accountAddress },
+      chain: 'sui:testnet',
+    })
+
+    const signature = signatureResult?.signature
+    if (!signature) {
+      throw new Error('Wallet did not return a signature. Please try again.')
+    }
+
+    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/wallet-login', {
+      walletAddress: accountAddress,
+      message,
+      signature,
+      nonce,
+    })
+
+    if (r.ok && r.data.token) {
+      setJwt(r.data.token)
+      const short = `${accountAddress.slice(0, 6)}...${accountAddress.slice(-4)}`
+      const providerName = provider.name?.trim() || 'Sui wallet'
+      setWalletState({ ok: true, msg: `Signed in with ${providerName} (${short})` })
+      show('Wallet authentication successful')
+      onNavigate?.('apps')
+      return
+    }
+
+    throw new Error(getApiErrorMessage(r.data, 'Wallet authentication failed.'))
+  }
 
   const normalizedSignupEmail = suEmail.trim().toLowerCase()
   const signupEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedSignupEmail)
@@ -114,65 +165,50 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
     }
 
     async function doWalletLogin() {
-    setWalletLoading(true)
-    setWalletState(null)
-
-    try {
-      const providers = await waitForInjectedWalletProviders()
-      if (!providers.length) {
-        throw new Error('No Sui wallet detected. Install Slush, refresh the page, and allow the extension on this site.')
+      setWalletState(null)
+      if (walletProviders.length > 1) {
+        setWalletPickerOpen(true)
+        return
       }
 
-      const provider = providers[0]
-      const accountAddress = await connectWalletAndGetAddress(provider)
-
-      if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
-        throw new Error('Invalid wallet address format received from wallet.')
+      const provider = walletProviders[0]
+      if (!provider) {
+        setWalletState({ ok: false, msg: 'No Sui wallet detected. Install Slush, refresh the page, and allow the extension on this site.' })
+        return
       }
 
-      const nonce = Date.now().toString()
-      const message = `Sign in to OpenSignal\nAddress: ${accountAddress}\nNonce: ${nonce}`
-
-      const signMessage = getWalletMessageSigner(provider)
-      if (!signMessage) {
-        throw new Error('This wallet does not support message signing.')
+      setWalletLoading(true)
+      try {
+        await performWalletLogin(provider)
+      } catch (error) {
+        setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
+        console.error('Wallet login error:', error)
+      } finally {
+        setWalletLoading(false)
+        setWalletPickerOpen(false)
       }
-
-      const signatureResult = await signMessage({
-        message,
-        account: provider.accounts?.[0] ?? { address: accountAddress },
-        chain: 'sui:testnet',
-      })
-
-      const signature = signatureResult?.signature
-      if (!signature) {
-        throw new Error('Wallet did not return a signature. Please try again.')
-      }
-
-      const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/wallet-login', {
-        walletAddress: accountAddress,
-        message,
-        signature,
-        nonce,
-      })
-
-      setWalletLoading(false)
-      if (r.ok && r.data.token) {
-        setJwt(r.data.token)
-        const short = `${accountAddress.slice(0, 6)}...${accountAddress.slice(-4)}`
-        const providerName = provider.name?.trim() || 'Sui wallet'
-        setWalletState({ ok: true, msg: `Signed in with ${providerName} (${short})` })
-        show('Wallet authentication successful')
-        onNavigate?.('apps')
-      } else {
-        setWalletState({ ok: false, msg: getApiErrorMessage(r.data, 'Wallet authentication failed.') })
-      }
-    } catch (error) {
-      setWalletLoading(false)
-      setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
-      console.error('Wallet login error:', error)
-    }
   }
+
+    async function confirmSelectedWallet() {
+      const provider = walletProviders[selectedWalletIndex] ?? walletProviders[0]
+      if (!provider) {
+        setWalletPickerOpen(false)
+        return
+      }
+
+      setWalletLoading(true)
+      setWalletPickerOpen(false)
+      setWalletState(null)
+
+      try {
+        await performWalletLogin(provider)
+      } catch (error) {
+        setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
+        console.error('Wallet login error:', error)
+      } finally {
+        setWalletLoading(false)
+      }
+    }
 
   return (
     <div>
@@ -190,9 +226,9 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
       {!jwt && (
         <FormPanel step={0} title="Quick sign-in with Sui wallet" desc="Connect your Sui wallet and sign a message to log in instantly.">
-          {walletDetected && walletNames.length > 0 && (
+          {walletDetected && walletProviders.length > 0 && (
             <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-              Detected wallet{walletNames.length > 1 ? 's' : ''}: {walletNames.join(', ')}
+              Detected wallet{walletProviders.length > 1 ? 's' : ''}: {walletProviders.map((wallet) => wallet.name?.trim() || 'Sui wallet').join(', ')}
             </div>
           )}
           {!walletDetected && (
@@ -207,6 +243,17 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
           {walletState && <ResponseBox ok={walletState.ok} friendly={walletState.msg} />}
         </FormPanel>
       )}
+
+      <WalletPickerDialog
+        open={walletPickerOpen}
+        wallets={walletProviders}
+        selectedIndex={selectedWalletIndex}
+        onSelectedIndexChange={setSelectedWalletIndex}
+        onCancel={() => setWalletPickerOpen(false)}
+        onConfirm={confirmSelectedWallet}
+        title="Choose a wallet to connect"
+        description="Select the wallet extension you want to use for this sign-in."
+      />
 
       <FormPanel step={1} title="Create an account" desc="Just your email and a password. That's it.">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">

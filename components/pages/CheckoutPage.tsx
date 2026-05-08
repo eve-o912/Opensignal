@@ -15,7 +15,15 @@ import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
 import Badge from '@/components/ui/Badge'
 import { CheckoutSession } from '@/types'
-import { waitForInjectedWalletProviders, getWalletSigners, getInjectedWalletNames } from '@/lib/wallet'
+import {
+  waitForInjectedWalletProviders,
+  getWalletSigners,
+  getInjectedWalletNames,
+  connectWalletAndGetAddress,
+  getWalletMessageSigner,
+  type InjectedWalletProvider,
+} from '@/lib/wallet'
+import WalletPickerDialog from '@/components/ui/WalletPickerDialog'
 
 interface PortalApp {
   id: string
@@ -66,18 +74,7 @@ function extractSignature(result: Record<string, unknown>): string {
   return ''
 }
 
-// function getWalletSigners(provider: InjectedWalletProvider): Array<(input: Record<string, unknown>) => Promise<Record<string, unknown>>> {
-//   const features = (provider.features ?? {}) as Record<string, unknown>
-//   const featureSignTransaction = (features['sui:signTransaction'] as { signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransaction
-//   const featureSignTransactionBlock = (features['sui:signTransactionBlock'] as { signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransactionBlock
 
-//   return [
-//     featureSignTransaction,
-//     provider.signTransaction,
-//     featureSignTransactionBlock,
-//     provider.signTransactionBlock,
-//   ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
-// }
 
 function readLinkedWallet(sessionKey: string): LinkedWalletInfo | null {
   if (typeof window === 'undefined' || !sessionKey) return null
@@ -147,7 +144,10 @@ export default function CheckoutPage() {
   const [linkedWallet, setLinkedWallet] = useState<LinkedWalletInfo | null>(null)
   const [walletLinkLoading, setWalletLinkLoading] = useState(false)
   const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [walletProviders, setWalletProviders] = useState<InjectedWalletProvider[]>([])
   const [walletNames, setWalletNames] = useState<string[]>([])
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false)
+  const [selectedWalletIndex, setSelectedWalletIndex] = useState(0)
   const [transactionKind, setTransactionKind] = useState('')
   const [txBuildLoading, setTxBuildLoading] = useState(false)
   const [txBuildState, setTxBuildState] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -248,67 +248,119 @@ export default function CheckoutPage() {
   useEffect(() => {
     let cancelled = false
 
-    const refreshWallets = () => {
+    async function loadWallets() {
+      const providers = await waitForInjectedWalletProviders(1000)
       if (cancelled) return
-      setWalletNames(getInjectedWalletNames())
+      setWalletProviders(providers)
+      setWalletNames(providers.map((wallet) => wallet.name?.trim() || 'Sui wallet'))
+      setSelectedWalletIndex((current) => Math.min(current, Math.max(providers.length - 1, 0)))
     }
 
-    refreshWallets()
-    const intervalId = window.setInterval(refreshWallets, 1000)
-    window.addEventListener('focus', refreshWallets)
-    document.addEventListener('visibilitychange', refreshWallets)
+    loadWallets()
+    const intervalId = window.setInterval(loadWallets, 1500)
+    window.addEventListener('focus', loadWallets)
+    document.addEventListener('visibilitychange', loadWallets)
 
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
-      window.removeEventListener('focus', refreshWallets)
-      document.removeEventListener('visibilitychange', refreshWallets)
+      window.removeEventListener('focus', loadWallets)
+      document.removeEventListener('visibilitychange', loadWallets)
     }
   }, [])
 
+  async function performLinkWallet(provider: InjectedWalletProvider) {
+    const accountAddress = await connectWalletAndGetAddress(provider)
+
+    if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
+      throw new Error('Invalid wallet address format received from wallet.')
+    }
+
+    const nonce = Date.now().toString()
+    const message = `OpenSignal wallet link\nSession: ${sessionDetails?.id ?? sessionId ?? 'merchant-flow'}\nAddress: ${accountAddress}\nNonce: ${nonce}`
+
+    const signMessage = getWalletMessageSigner(provider)
+    if (!signMessage) {
+      throw new Error('This wallet does not support message signing.')
+    }
+
+    const signatureResult = await signMessage({
+      message,
+      account: provider.accounts?.[0] ?? { address: accountAddress },
+      chain: `sui:${network}`,
+    })
+
+    const signature = signatureResult?.signature
+    if (!signature) {
+      throw new Error('Wallet did not return a signature. Please try again.')
+    }
+
+    const walletInfo: LinkedWalletInfo = {
+      address: accountAddress,
+      provider: provider.name?.trim() || 'Sui wallet',
+      signature,
+      message,
+    }
+
+    const sessionKey = sessionDetails?.id || sessionId
+    if (sessionKey) saveLinkedWallet(sessionKey, walletInfo)
+
+    setLinkedWallet(walletInfo)
+    setSender(accountAddress)
+    setTransactionKind('')
+    setUserSignature('')
+    setTxBuildState(null)
+    setWalletLinkState({ ok: true, msg: `Wallet linked: ${accountAddress}` })
+  }
+
   async function linkWallet() {
-    setWalletLinkLoading(true)
     setWalletLinkState(null)
 
     try {
-      const providers = await waitForInjectedWalletProviders()
+      setWalletLinkLoading(true)
+      let providers = walletProviders
       if (!providers.length) {
-        throw new Error('No Sui wallet extension detected. If Slush is installed, refresh the page and allow the extension on this site.')
+        providers = await waitForInjectedWalletProviders()
+        setWalletProviders(providers)
+        setWalletNames(providers.map((wallet) => wallet.name?.trim() || 'Sui wallet'))
+      }
+
+      if (providers.length > 1) {
+        setWalletPickerOpen(true)
+        return
       }
 
       const provider = providers[0]
-      const connected = await provider.connect?.({})
-      const accountAddress = connected?.accounts?.[0]?.address ?? (await provider.getAccounts?.())?.[0]?.address
-
-      if (!accountAddress) {
-        throw new Error('Wallet did not return an account address.')
+      if (!provider) {
+        throw new Error('No Sui wallet extension detected. If Slush is installed, refresh the page and allow the extension on this site.')
       }
 
-      const message = `OpenSignal wallet link\nSession: ${sessionDetails?.id ?? sessionId ?? 'merchant-flow'}\nAddress: ${accountAddress}\nNonce: ${Date.now()}`
-      const signatureFeature = (provider.features ?? {})['sui:signMessage'] as
-        | { signMessage?: (input: Record<string, unknown>) => Promise<{ signature?: string }> }
-        | undefined
-      const signMessage = signatureFeature?.signMessage ?? provider.signMessage
-      const signatureResult = await signMessage?.({ message, account: provider.accounts?.[0] ?? { address: accountAddress }, chain: `sui:${network}` })
-
-      const walletInfo: LinkedWalletInfo = {
-        address: accountAddress,
-        provider: provider.name?.trim() || walletNames[0] || 'Sui wallet',
-        signature: signatureResult?.signature,
-        message,
-      }
-
-      const sessionKey = sessionDetails?.id || sessionId
-      if (sessionKey) saveLinkedWallet(sessionKey, walletInfo)
-
-      setLinkedWallet(walletInfo)
-      setSender(accountAddress)
-      setTransactionKind('')
-      setUserSignature('')
-      setTxBuildState(null)
-      setWalletLinkState({ ok: true, msg: `Wallet linked: ${accountAddress}` })
+      await performLinkWallet(provider)
     } catch (error) {
       setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
+      console.error('Wallet link error:', error)
+    } finally {
+      setWalletLinkLoading(false)
+      setWalletPickerOpen(false)
+    }
+  }
+
+  async function confirmSelectedWallet() {
+    const provider = walletProviders[selectedWalletIndex] ?? walletProviders[0]
+    if (!provider) {
+      setWalletPickerOpen(false)
+      return
+    }
+
+    setWalletLinkLoading(true)
+    setWalletPickerOpen(false)
+    setWalletLinkState(null)
+
+    try {
+      await performLinkWallet(provider)
+    } catch (error) {
+      setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
+      console.error('Wallet link error:', error)
     } finally {
       setWalletLinkLoading(false)
     }
@@ -356,6 +408,7 @@ export default function CheckoutPage() {
 
     setTxBuildLoading(true)
     setTxBuildState(null)
+
     try {
       const targetNetwork = sessionDetails.network === 'mainnet' ? 'mainnet' : 'testnet'
       const client = new SuiJsonRpcClient({ url: resolveRpcUrl(targetNetwork), network: targetNetwork })
@@ -681,6 +734,17 @@ export default function CheckoutPage() {
             {buyerState && <ResponseBox ok={buyerState.ok} friendly={buyerState.msg} raw={buyerState.raw} />}
           </FormPanel>
         </div>
+
+        <WalletPickerDialog
+          open={walletPickerOpen}
+          wallets={walletProviders}
+          selectedIndex={selectedWalletIndex}
+          onSelectedIndexChange={setSelectedWalletIndex}
+          onCancel={() => setWalletPickerOpen(false)}
+          onConfirm={confirmSelectedWallet}
+          title="Choose a wallet to link"
+          description="Select the wallet extension you want to use for checkout and sponsored signing."
+        />
       </div>
     </div>
   )
