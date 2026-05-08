@@ -69,6 +69,27 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
   const walletDetected = walletProviders.length > 0
 
+  async function postWalletLogin(payload: { walletAddress: string; message: string; signature: string; nonce: string }) {
+    const paths = [
+      '/v1/portal/auth/wallet-login',
+      '/v1/auth/wallet-login',
+      '/auth/wallet-login',
+    ]
+
+    let lastResult: Awaited<ReturnType<typeof apiCall<{ token?: string }>>> | null = null
+    for (const path of paths) {
+      const result = await apiCall<{ token?: string }>('POST', path, payload)
+      if (result.ok) return result
+      lastResult = result
+
+      const errorMessage = getApiErrorMessage(result.data)
+      const isMissingRoute = result.status === 404 || errorMessage === 'Non-JSON response'
+      if (!isMissingRoute) break
+    }
+
+    return lastResult ?? { ok: false, status: 0, data: { error: 'Wallet authentication failed.' } }
+  }
+
   async function performWalletLogin(provider: InjectedWalletProvider) {
     const accountAddress = await connectWalletAndGetAddress(provider)
 
@@ -95,7 +116,7 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
       throw new Error('Wallet did not return a signature. Please try again.')
     }
 
-    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/wallet-login', {
+    const r = await postWalletLogin({
       walletAddress: accountAddress,
       message,
       signature,
