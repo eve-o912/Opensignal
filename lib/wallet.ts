@@ -1,8 +1,12 @@
+import { getWallets } from '@mysten/wallet-standard'
+
 export interface InjectedWalletProvider {
   name?: string
   icon?: string
+  version?: string
+  chains?: string[]
   features?: Record<string, unknown>
-  accounts?: Array<{ address?: string }>
+  accounts?: Array<{ address?: string; chains?: string[]; features?: string[] }>
   connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
   getAccounts?: () => Promise<Array<{ address?: string }>>
   signMessage?: (input: Record<string, unknown>) => Promise<{ signature?: string }>
@@ -10,112 +14,43 @@ export interface InjectedWalletProvider {
   signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
-type WalletRegistry = {
-  get?: () => unknown
-  wallets?: unknown
-}
-
-type WindowWithWallets = Window & {
-  getWallets?: () => unknown
-  wallets?: unknown
-  suiWallet?: unknown
-  slushWallet?: unknown
-  wallet?: unknown
-  walletStandard?: WalletRegistry
-  __wallet_standard__?: WalletRegistry
-}
-
-function isWalletProvider(candidate: unknown): candidate is InjectedWalletProvider {
-  if (!candidate || typeof candidate !== 'object') return false
-
-  const provider = candidate as InjectedWalletProvider & { features?: Record<string, unknown> }
-  return Boolean(
-    provider.connect ||
-    provider.getAccounts ||
-    provider.signMessage ||
-    provider.signTransaction ||
-    provider.signTransactionBlock ||
-    provider.features,
-  )
-}
-
-function collectProviders(target: InjectedWalletProvider[], source: unknown): void {
-  if (!source) return
-
-  if (Array.isArray(source)) {
-    for (const entry of source) {
-      if (isWalletProvider(entry) && !target.includes(entry)) {
-        target.push(entry)
-      }
-    }
-    return
-  }
-
-  if (isWalletProvider(source) && !target.includes(source)) {
-    target.push(source)
-  }
-}
-
-function probeRegistry(target: InjectedWalletProvider[], registry: unknown): void {
-  if (!registry || typeof registry !== 'object') return
-  const reg = registry as WalletRegistry
-  try {
-    collectProviders(target, typeof reg.get === 'function' ? reg.get() : null)
-  } catch {
-    // ignore registry errors
-  }
-  collectProviders(target, reg.wallets)
-}
-
+/**
+ * Reads all currently registered Wallet Standard wallets.
+ * This is the official way — works for Slush, Sui Wallet, and any
+ * other extension that calls registerWallet() on load.
+ */
 export function getInjectedWalletProviders(): InjectedWalletProvider[] {
   if (typeof window === 'undefined') return []
 
-  const providers: InjectedWalletProvider[] = []
-  const win = window as WindowWithWallets
-
-  // 1. Wallet Standard registry — primary path for Slush and modern Sui wallets.
-  //    Slush registers under window.__wallet_standard__ and fires
-  //    'wallet-standard:register-wallet' when it injects.
-  probeRegistry(providers, win.__wallet_standard__)
-
-  // 2. Wallet Standard under the non-underscored key (some older builds).
-  probeRegistry(providers, win.walletStandard)
-
-  // 3. Global getWallets() factory (used by some wallet aggregators).
   try {
-    collectProviders(providers, typeof win.getWallets === 'function' ? win.getWallets() : null)
+    const wallets = getWallets().get()
+    return wallets as unknown as InjectedWalletProvider[]
   } catch {
-    // ignore
+    return []
   }
-
-  // 4. window.wallets array or registry.
-  probeRegistry(providers, win.wallets)
-  collectProviders(providers, win.wallets)
-
-  // 5. navigator.wallets (Payment Handler API-adjacent pattern).
-  const navWallets = (window.navigator as Navigator & { wallets?: unknown }).wallets
-  probeRegistry(providers, navWallets)
-  collectProviders(providers, navWallets)
-
-  // 6. Legacy / direct injection fallbacks.
-  collectProviders(providers, win.suiWallet)
-  collectProviders(providers, win.slushWallet)
-  collectProviders(providers, win.wallet)
-
-  return providers
 }
 
 export function getInjectedWalletNames(): string[] {
   return getInjectedWalletProviders()
-    .map((provider) => provider.name?.trim() || 'Sui wallet')
+    .map((w) => w.name?.trim() || 'Sui wallet')
 }
 
-
+/**
+ * Waits up to timeoutMs for at least one Wallet Standard wallet to appear.
+ * Listens for the register event so detection is instant when the extension
+ * injects after page load (common on deployed origins).
+ */
 export function waitForInjectedWalletProviders(timeoutMs = 3000): Promise<InjectedWalletProvider[]> {
   return new Promise((resolve) => {
-    const check = () => getInjectedWalletProviders()
+    if (typeof window === 'undefined') {
+      resolve([])
+      return
+    }
 
-    const current = check()
+    const walletsApi = getWallets()
+
+    // Already registered before we got here
+    const current = walletsApi.get() as unknown as InjectedWalletProvider[]
     if (current.length > 0) {
       resolve(current)
       return
@@ -126,25 +61,102 @@ export function waitForInjectedWalletProviders(timeoutMs = 3000): Promise<Inject
     function finish() {
       if (settled) return
       settled = true
-      clearInterval(intervalId)
       clearTimeout(timeoutId)
-      window.removeEventListener('wallet-standard:register-wallet', onRegister)
-      resolve(check())
+      unsubscribe()
+      resolve(walletsApi.get() as unknown as InjectedWalletProvider[])
     }
 
-    function onRegister() {
-      // Give the wallet a tick to finish registering before we read it.
+    // The Wallet Standard fires this every time a wallet calls registerWallet()
+    const unsubscribe = walletsApi.on('register', () => {
+      // Small tick so the wallet finishes its own setup
       setTimeout(finish, 50)
-    }
+    })
 
-    window.addEventListener('wallet-standard:register-wallet', onRegister)
-
-    // Poll as a safety net in case the event already fired before we listened.
-    const intervalId = window.setInterval(() => {
-      if (check().length > 0) finish()
-    }, 100)
-
-    // Hard timeout — resolve with whatever we have (may be empty).
     const timeoutId = window.setTimeout(finish, timeoutMs)
   })
+}
+
+/**
+ * Given a provider, returns all available signing functions to try in order.
+ */
+export function getWalletSigners(
+  provider: InjectedWalletProvider
+): Array<(input: Record<string, unknown>) => Promise<Record<string, unknown>>> {
+  const features = (provider.features ?? {}) as Record<string, unknown>
+
+  const featureSignTx = (
+    features['sui:signTransaction'] as
+      | { signTransaction?: (i: Record<string, unknown>) => Promise<Record<string, unknown>> }
+      | undefined
+  )?.signTransaction
+
+  const featureSignTxBlock = (
+    features['sui:signTransactionBlock'] as
+      | { signTransactionBlock?: (i: Record<string, unknown>) => Promise<Record<string, unknown>> }
+      | undefined
+  )?.signTransactionBlock
+
+  return [
+    featureSignTx,
+    provider.signTransaction,
+    featureSignTxBlock,
+    provider.signTransactionBlock,
+  ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
+}
+
+/**
+ * Given a provider, returns the signPersonalMessage function if available.
+ */
+export function getWalletMessageSigner(
+  provider: InjectedWalletProvider
+): ((input: Record<string, unknown>) => Promise<{ signature?: string }>) | undefined {
+  const features = (provider.features ?? {}) as Record<string, unknown>
+
+  // Modern Wallet Standard key
+  const modernFeature = features['sui:signPersonalMessage'] as
+    | { signPersonalMessage?: (i: Record<string, unknown>) => Promise<{ signature?: string }> }
+    | undefined
+
+  // Legacy key used by older builds
+  const legacyFeature = features['sui:signMessage'] as
+    | { signMessage?: (i: Record<string, unknown>) => Promise<{ signature?: string }> }
+    | undefined
+
+  return modernFeature?.signPersonalMessage ?? legacyFeature?.signMessage ?? provider.signMessage
+}
+
+/**
+ * Given a provider, calls standard:connect and returns the first account address.
+ */
+export async function connectWalletAndGetAddress(
+  provider: InjectedWalletProvider
+): Promise<string> {
+  const features = (provider.features ?? {}) as Record<string, unknown>
+  const connectFeature = features['standard:connect'] as
+    | { connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string }> }> }
+    | undefined
+
+  const connectFn = connectFeature?.connect ?? provider.connect
+
+  let address: string | undefined
+
+  try {
+    const result = await connectFn?.({})
+    address = result?.accounts?.[0]?.address
+  } catch {
+    // fallback: try already-authorized accounts
+    address = provider.accounts?.[0]?.address
+  }
+
+  if (!address) {
+    // last resort: getAccounts
+    const accounts = await provider.getAccounts?.()
+    address = accounts?.[0]?.address
+  }
+
+  if (!address) {
+    throw new Error('Wallet did not return an account address.')
+  }
+
+  return address
 }

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mysten/sui": "^2.16.0",
+    "@mysten/wallet-standard": "^0.20.3",
     "autoprefixer": "^10.4.27",
     "chart.js": "^4.5.1",
     "next": "15.5.15",

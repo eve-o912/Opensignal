@@ -4,13 +4,19 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { apiCall, getApiErrorMessage } from '@/lib/api'
-import { getInjectedWalletNames, getInjectedWalletProviders } from '@/lib/wallet'
+import {
+  getInjectedWalletNames,
+  waitForInjectedWalletProviders,
+  connectWalletAndGetAddress,
+  getWalletMessageSigner,
+} from '@/lib/wallet'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
+
 
 interface AccountPageProps {
   onNavigate?: (page: string) => void
@@ -95,42 +101,30 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
   }
 
   async function doLogin() {
-    setLiLoading(true); setLiState(null)
-    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
-    setLiLoading(false)
-    if (r.ok && r.data.token) {
-      setJwt(r.data.token)
-      setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
-      show('Signed in successfully')
-    } else {
-      setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
+      setLiLoading(true); setLiState(null)
+      const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
+      setLiLoading(false)
+      if (r.ok && r.data.token) {
+        setJwt(r.data.token)
+        setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
+        show('Signed in successfully')
+      } else {
+        setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
+      }
     }
-  }
 
-  async function doWalletLogin() {
+    async function doWalletLogin() {
     setWalletLoading(true)
     setWalletState(null)
 
     try {
-      const providers = getInjectedWalletProviders()
+      const providers = await waitForInjectedWalletProviders()
       if (!providers.length) {
-        throw new Error('No Sui wallet extension detected. If Slush is installed, refresh the page and allow the extension on this site.')
+        throw new Error('No Sui wallet detected. Install Slush, refresh the page, and allow the extension on this site.')
       }
 
       const provider = providers[0]
-
-      let accountAddress: string | undefined
-      try {
-        const connected = await provider.connect?.({})
-        accountAddress = connected?.accounts?.[0]?.address
-      } catch {
-        const accounts = await provider.getAccounts?.()
-        accountAddress = accounts?.[0]?.address
-      }
-
-      if (!accountAddress) {
-        throw new Error('Wallet connection failed. Could not retrieve wallet address. Please try again.')
-      }
+      const accountAddress = await connectWalletAndGetAddress(provider)
 
       if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
         throw new Error('Invalid wallet address format received from wallet.')
@@ -139,23 +133,23 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
       const nonce = Date.now().toString()
       const message = `Sign in to OpenSignal\nAddress: ${accountAddress}\nNonce: ${nonce}`
 
-      let signature: string | undefined
-      try {
-        const signatureFeature = (provider.features ?? {})['sui:signMessage'] as
-          | { signMessage?: (input: Record<string, unknown>) => Promise<{ signature?: string }> }
-          | undefined
-        const signMessage = signatureFeature?.signMessage ?? provider.signMessage
-        const signatureResult = await signMessage?.({ message, account: provider.accounts?.[0] ?? { address: accountAddress }, chain: 'sui:testnet' })
-        signature = signatureResult?.signature
-      } catch (error) {
-        throw new Error(error instanceof Error ? `Wallet signing failed: ${error.message}` : 'Wallet rejected the signing request. Please try again.')
+      const signMessage = getWalletMessageSigner(provider)
+      if (!signMessage) {
+        throw new Error('This wallet does not support message signing.')
       }
 
+      const signatureResult = await signMessage({
+        message,
+        account: provider.accounts?.[0] ?? { address: accountAddress },
+        chain: 'sui:testnet',
+      })
+
+      const signature = signatureResult?.signature
       if (!signature) {
-        throw new Error('Wallet did not return a signature. Please ensure your wallet supports message signing and try again.')
+        throw new Error('Wallet did not return a signature. Please try again.')
       }
 
-      const r = await apiCall<{ token?: string; isWalletAuth?: boolean }>('POST', '/v1/portal/auth/wallet-login', {
+      const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/wallet-login', {
         walletAddress: accountAddress,
         message,
         signature,
@@ -165,19 +159,17 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
       setWalletLoading(false)
       if (r.ok && r.data.token) {
         setJwt(r.data.token)
-        const shortAddress = `${accountAddress.slice(0, 6)}...${accountAddress.slice(-4)}`
-        const providerName = provider.name?.trim() || walletNames[0] || 'Sui wallet'
-        setWalletState({ ok: true, msg: `Successfully signed in with ${providerName} (${shortAddress})` })
+        const short = `${accountAddress.slice(0, 6)}...${accountAddress.slice(-4)}`
+        const providerName = provider.name?.trim() || 'Sui wallet'
+        setWalletState({ ok: true, msg: `Signed in with ${providerName} (${short})` })
         show('Wallet authentication successful')
         onNavigate?.('apps')
       } else {
-        const errorMsg = getApiErrorMessage(r.data, 'Wallet authentication failed on the backend.')
-        setWalletState({ ok: false, msg: errorMsg })
+        setWalletState({ ok: false, msg: getApiErrorMessage(r.data, 'Wallet authentication failed.') })
       }
     } catch (error) {
       setWalletLoading(false)
-      const errorMsg = error instanceof Error ? error.message : 'Wallet sign-in failed. Please check your connection and try again.'
-      setWalletState({ ok: false, msg: errorMsg })
+      setWalletState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet sign-in failed.' })
       console.error('Wallet login error:', error)
     }
   }

@@ -15,7 +15,7 @@ import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
 import Badge from '@/components/ui/Badge'
 import { CheckoutSession } from '@/types'
-import { getInjectedWalletNames, getInjectedWalletProviders, type InjectedWalletProvider } from '@/lib/wallet'
+import { waitForInjectedWalletProviders, getWalletSigners, getInjectedWalletNames } from '@/lib/wallet'
 
 interface PortalApp {
   id: string
@@ -66,18 +66,18 @@ function extractSignature(result: Record<string, unknown>): string {
   return ''
 }
 
-function getWalletSigners(provider: InjectedWalletProvider): Array<(input: Record<string, unknown>) => Promise<Record<string, unknown>>> {
-  const features = (provider.features ?? {}) as Record<string, unknown>
-  const featureSignTransaction = (features['sui:signTransaction'] as { signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransaction
-  const featureSignTransactionBlock = (features['sui:signTransactionBlock'] as { signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransactionBlock
+// function getWalletSigners(provider: InjectedWalletProvider): Array<(input: Record<string, unknown>) => Promise<Record<string, unknown>>> {
+//   const features = (provider.features ?? {}) as Record<string, unknown>
+//   const featureSignTransaction = (features['sui:signTransaction'] as { signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransaction
+//   const featureSignTransactionBlock = (features['sui:signTransactionBlock'] as { signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>> } | undefined)?.signTransactionBlock
 
-  return [
-    featureSignTransaction,
-    provider.signTransaction,
-    featureSignTransactionBlock,
-    provider.signTransactionBlock,
-  ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
-}
+//   return [
+//     featureSignTransaction,
+//     provider.signTransaction,
+//     featureSignTransactionBlock,
+//     provider.signTransactionBlock,
+//   ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
+// }
 
 function readLinkedWallet(sessionKey: string): LinkedWalletInfo | null {
   if (typeof window === 'undefined' || !sessionKey) return null
@@ -271,7 +271,7 @@ export default function CheckoutPage() {
     setWalletLinkState(null)
 
     try {
-      const providers = getInjectedWalletProviders()
+      const providers = await waitForInjectedWalletProviders()
       if (!providers.length) {
         throw new Error('No Sui wallet extension detected. If Slush is installed, refresh the page and allow the extension on this site.')
       }
@@ -410,7 +410,7 @@ export default function CheckoutPage() {
   async function signSponsoredTransactionBytes(bytesBase64: string): Promise<string | null> {
     if (!sender) return null
 
-    const providers = getInjectedWalletProviders()
+    const providers = await waitForInjectedWalletProviders()
     const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
     const provider = preferred ?? providers[0]
 
