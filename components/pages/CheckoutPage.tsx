@@ -15,6 +15,7 @@ import ResponseBox from '@/components/ui/ResponseBox'
 import Spinner from '@/components/ui/Spinner'
 import Badge from '@/components/ui/Badge'
 import { CheckoutSession } from '@/types'
+import { getInjectedWalletNames, getInjectedWalletProviders, type InjectedWalletProvider } from '@/lib/wallet'
 
 interface PortalApp {
   id: string
@@ -53,17 +54,6 @@ interface LinkedWalletInfo {
   message?: string
 }
 
-interface InjectedWalletProvider {
-  name?: string
-  features?: Record<string, unknown>
-  accounts?: Array<{ address?: string }>
-  connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
-  getAccounts?: () => Promise<Array<{ address?: string }>>
-  signMessage?: (input: { message: string }) => Promise<{ signature?: string }>
-  signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
-  signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
-}
-
 function extractSignature(result: Record<string, unknown>): string {
   if (typeof result.signature === 'string') return result.signature
   if (typeof result.txSignature === 'string') return String(result.txSignature)
@@ -87,21 +77,6 @@ function getWalletSigners(provider: InjectedWalletProvider): Array<(input: Recor
     featureSignTransactionBlock,
     provider.signTransactionBlock,
   ].filter((fn): fn is (input: Record<string, unknown>) => Promise<Record<string, unknown>> => typeof fn === 'function')
-}
-
-function getInjectedWalletProviders(): InjectedWalletProvider[] {
-  if (typeof window === 'undefined') return []
-
-  const win = window as Window & {
-    getWallets?: () => InjectedWalletProvider[]
-    wallets?: InjectedWalletProvider[]
-    suiWallet?: InjectedWalletProvider
-  }
-
-  if (typeof win.getWallets === 'function') return win.getWallets().filter(Boolean)
-  if (Array.isArray(win.wallets)) return win.wallets.filter(Boolean)
-  if (win.suiWallet) return [win.suiWallet]
-  return []
 }
 
 function readLinkedWallet(sessionKey: string): LinkedWalletInfo | null {
@@ -172,6 +147,7 @@ export default function CheckoutPage() {
   const [linkedWallet, setLinkedWallet] = useState<LinkedWalletInfo | null>(null)
   const [walletLinkLoading, setWalletLinkLoading] = useState(false)
   const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [walletNames, setWalletNames] = useState<string[]>([])
   const [transactionKind, setTransactionKind] = useState('')
   const [txBuildLoading, setTxBuildLoading] = useState(false)
   const [txBuildState, setTxBuildState] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -269,6 +245,27 @@ export default function CheckoutPage() {
     }
   }, [sender, sessionDetails?.id, sessionId])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const refreshWallets = () => {
+      if (cancelled) return
+      setWalletNames(getInjectedWalletNames())
+    }
+
+    refreshWallets()
+    const intervalId = window.setInterval(refreshWallets, 1000)
+    window.addEventListener('focus', refreshWallets)
+    document.addEventListener('visibilitychange', refreshWallets)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', refreshWallets)
+      document.removeEventListener('visibilitychange', refreshWallets)
+    }
+  }, [])
+
   async function linkWallet() {
     setWalletLinkLoading(true)
     setWalletLinkState(null)
@@ -276,7 +273,7 @@ export default function CheckoutPage() {
     try {
       const providers = getInjectedWalletProviders()
       if (!providers.length) {
-        throw new Error('No Sui wallet extension detected. Install a compatible wallet and try again.')
+        throw new Error('No Sui wallet extension detected. If Slush is installed, refresh the page and allow the extension on this site.')
       }
 
       const provider = providers[0]
@@ -288,11 +285,15 @@ export default function CheckoutPage() {
       }
 
       const message = `OpenSignal wallet link\nSession: ${sessionDetails?.id ?? sessionId ?? 'merchant-flow'}\nAddress: ${accountAddress}\nNonce: ${Date.now()}`
-      const signatureResult = await provider.signMessage?.({ message })
+      const signatureFeature = (provider.features ?? {})['sui:signMessage'] as
+        | { signMessage?: (input: Record<string, unknown>) => Promise<{ signature?: string }> }
+        | undefined
+      const signMessage = signatureFeature?.signMessage ?? provider.signMessage
+      const signatureResult = await signMessage?.({ message, account: provider.accounts?.[0] ?? { address: accountAddress }, chain: `sui:${network}` })
 
       const walletInfo: LinkedWalletInfo = {
         address: accountAddress,
-        provider: provider.name ?? 'Sui wallet',
+        provider: provider.name?.trim() || walletNames[0] || 'Sui wallet',
         signature: signatureResult?.signature,
         message,
       }
@@ -530,6 +531,12 @@ export default function CheckoutPage() {
           title="Sponsored checkout"
           sub="Create a merchant checkout session, then let the customer complete the payment from their linked wallet while OpenSignal covers gas."
         />
+
+        {walletNames.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 mb-4">
+            Detected wallet{walletNames.length > 1 ? 's' : ''}: {walletNames.join(', ')}
+          </div>
+        )}
 
         {sessionError && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 mb-4">
