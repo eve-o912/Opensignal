@@ -232,8 +232,13 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (!sessionDetails || !sender || transactionKind || txBuildLoading) return
 
-    buildTransactionKindFromIntent()
-  }, [sessionDetails, sender])
+    // Auto-generate transaction bytes for testing once sender is available
+    const timer = setTimeout(() => {
+      buildTransactionKindFromIntent()
+    }, 100)
+
+    return () => clearTimeout(timer)
+  }, [sessionDetails, sender, transactionKind, txBuildLoading])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -694,7 +699,7 @@ export default function CheckoutPage() {
                   setSender(e.target.value)
                   setSenderOverridden(true)
                 }}
-                hint="Auto-filled from the linked wallet, but you can edit it to use a different account."
+                hint="Auto-filled from your linked wallet, but you can edit it to send from a different account."
               />
               <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
                 value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
@@ -703,7 +708,7 @@ export default function CheckoutPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
-                  <p className="text-xs text-blue-500">Generated automatically from session intent and linked wallet balance.</p>
+                  <p className="text-xs text-blue-500">Auto-generated from session intent and sender balance. Click "Regenerate bytes" if you need to update them.</p>
                 </div>
                 <Button
                   variant="sm"
