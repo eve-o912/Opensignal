@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
@@ -18,7 +18,6 @@ import { CheckoutSession } from '@/types'
 import {
   waitForInjectedWalletProviders,
   getWalletSigners,
-  getInjectedWalletNames,
   connectWalletAndGetAddress,
   getWalletMessageSigner,
   type InjectedWalletProvider,
@@ -229,6 +228,63 @@ export default function CheckoutPage() {
     loadSession()
   }, [sessionId, checkoutToken])
 
+  const buildTransactionKindFromIntent = useCallback(async (): Promise<string | null> => {
+    if (!sessionDetails || !sender) return null
+
+    setTxBuildLoading(true)
+    setTxBuildState(null)
+
+    try {
+      const targetNetwork = sessionDetails.network === 'mainnet' ? 'mainnet' : 'testnet'
+      const client = new SuiJsonRpcClient({ url: resolveRpcUrl(targetNetwork), network: targetNetwork })
+      const amountMist = BigInt(sessionDetails.purchaseAmountMist)
+
+      const coins = await client.getCoins({
+        owner: sender,
+        coinType: '0x2::sui::SUI',
+        limit: 50,
+      })
+
+      const spendCoin = coins.data.find((coin: { balance: string; coinObjectId: string }) => BigInt(coin.balance) >= amountMist)
+      if (!spendCoin) {
+        throw new Error('Linked wallet has insufficient SUI balance for this payment amount.')
+      }
+
+      const tx = new Transaction()
+      tx.setSender(sender)
+
+      const [paymentCoin] = tx.splitCoins(
+        tx.object(spendCoin.coinObjectId),
+        [tx.pure.u64(amountMist.toString())],
+      )
+
+      tx.moveCall({
+        target: '0x2::transfer::public_transfer',
+        typeArguments: ['0x2::coin::Coin<0x2::sui::SUI>'],
+        arguments: [paymentCoin, tx.pure.address(sessionDetails.recipient)],
+      })
+
+      const kindBytes = await tx.build({
+        client,
+        onlyTransactionKind: true,
+      })
+
+      const kindBase64 = bytesToBase64(kindBytes)
+      setTransactionKind(kindBase64)
+      setTxBuildState({ ok: true, msg: 'Transaction bytes generated from checkout intent.' })
+      return kindBase64
+    } catch (error) {
+      setTransactionKind('')
+      setTxBuildState({
+        ok: false,
+        msg: error instanceof Error ? error.message : 'Could not build transaction bytes from intent.',
+      })
+      return null
+    } finally {
+      setTxBuildLoading(false)
+    }
+  }, [sessionDetails, sender])
+
   useEffect(() => {
     if (!sessionDetails || !sender || transactionKind || txBuildLoading) return
 
@@ -238,7 +294,7 @@ export default function CheckoutPage() {
     }, 100)
 
     return () => clearTimeout(timer)
-  }, [sessionDetails, sender, transactionKind, txBuildLoading])
+  }, [sessionDetails, sender, transactionKind, txBuildLoading, buildTransactionKindFromIntent])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -412,63 +468,6 @@ export default function CheckoutPage() {
       })
     } else {
       setMerchantState({ ok: false, msg: getApiErrorMessage(r.data, 'Could not create checkout session.') })
-    }
-  }
-
-  async function buildTransactionKindFromIntent(): Promise<string | null> {
-    if (!sessionDetails || !sender) return null
-
-    setTxBuildLoading(true)
-    setTxBuildState(null)
-
-    try {
-      const targetNetwork = sessionDetails.network === 'mainnet' ? 'mainnet' : 'testnet'
-      const client = new SuiJsonRpcClient({ url: resolveRpcUrl(targetNetwork), network: targetNetwork })
-      const amountMist = BigInt(sessionDetails.purchaseAmountMist)
-
-      const coins = await client.getCoins({
-        owner: sender,
-        coinType: '0x2::sui::SUI',
-        limit: 50,
-      })
-
-      const spendCoin = coins.data.find((coin: { balance: string; coinObjectId: string }) => BigInt(coin.balance) >= amountMist)
-      if (!spendCoin) {
-        throw new Error('Linked wallet has insufficient SUI balance for this payment amount.')
-      }
-
-      const tx = new Transaction()
-      tx.setSender(sender)
-
-      const [paymentCoin] = tx.splitCoins(
-        tx.object(spendCoin.coinObjectId),
-        [tx.pure.u64(amountMist.toString())],
-      )
-
-      tx.moveCall({
-        target: '0x2::transfer::public_transfer',
-        typeArguments: ['0x2::coin::Coin<0x2::sui::SUI>'],
-        arguments: [paymentCoin, tx.pure.address(sessionDetails.recipient)],
-      })
-
-      const kindBytes = await tx.build({
-        client,
-        onlyTransactionKind: true,
-      })
-
-      const kindBase64 = bytesToBase64(kindBytes)
-      setTransactionKind(kindBase64)
-      setTxBuildState({ ok: true, msg: 'Transaction bytes generated from checkout intent.' })
-      return kindBase64
-    } catch (error) {
-      setTransactionKind('')
-      setTxBuildState({
-        ok: false,
-        msg: error instanceof Error ? error.message : 'Could not build transaction bytes from intent.',
-      })
-      return null
-    } finally {
-      setTxBuildLoading(false)
     }
   }
 
@@ -708,7 +707,7 @@ export default function CheckoutPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
-                  <p className="text-xs text-blue-500">Auto-generated from session intent and sender balance. Click \"Regenerate bytes\" if you need to update them.</p>
+                  <p className="text-xs text-blue-500">Auto-generated from session intent and sender balance. Click &quot;Regenerate bytes&quot; if you need to update them.</p>
                 </div>
                 <Button
                   variant="sm"
