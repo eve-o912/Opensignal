@@ -91,7 +91,12 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
   }
 
   async function performWalletLogin(provider: InjectedWalletProvider) {
-    const accountAddress = await connectWalletAndGetAddress(provider)
+    const rawAddress = await connectWalletAndGetAddress(provider)
+
+    // Normalize to lowercase immediately — Sui addresses are case-insensitive hex
+    // but the server's message.includes() check and address comparison both use
+    // lowercase, so the message must be built with the already-lowercased value.
+    const accountAddress = rawAddress.toLowerCase()
 
     // Sui addresses: 0x + exactly 64 hex characters (32 bytes)
     if (!/^0x[a-fA-F0-9]{64}$/.test(accountAddress)) {
