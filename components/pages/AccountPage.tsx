@@ -109,7 +109,7 @@ export default function AccountPage({ onNavigate }: AccountPageProps) {
 
     const signatureResult = await signMessage({
       message: messageBytes,
-      account: provider.accounts?.[0] ?? { address: accountAddress },
+      account: { address: accountAddress },
       chain: 'sui:testnet',
     })
 
