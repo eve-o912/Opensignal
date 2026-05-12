@@ -309,13 +309,15 @@ export default function CheckoutPage() {
     const sessionKey = sessionDetails?.id || sessionId
     if (sessionKey) saveLinkedWallet(sessionKey, walletInfo)
 
+    // Immediately populate sender with the linked wallet address
     setLinkedWallet(walletInfo)
     setSender(accountAddress)
     setSenderOverridden(false)
     setTransactionKind('')
     setUserSignature('')
     setTxBuildState(null)
-    setWalletLinkState({ ok: true, msg: `Wallet linked: ${accountAddress}` })
+    const short = `${accountAddress.slice(0, 6)}...${accountAddress.slice(-4)}`
+    setWalletLinkState({ ok: true, msg: `✓ Wallet linked and sender address set to ${short}` })
   }
 
   async function linkWallet() {
@@ -663,7 +665,7 @@ export default function CheckoutPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-blue-900">Linked wallet</p>
-                  <p className="text-xs text-blue-500">Connect once to auto-fill sender, auto-generate bytes, and sign sponsored transactions.</p>
+                  <p className="text-xs text-blue-500">Connect once to auto-fill sender address below, auto-generate bytes, and sign sponsored transactions.</p>
                 </div>
                 <Button variant="sm" onClick={linkWallet} disabled={walletLinkLoading}>
                   {walletLinkLoading ? 'Linking…' : linkedWallet ? 'Relink wallet' : 'Link wallet'}
