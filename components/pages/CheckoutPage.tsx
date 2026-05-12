@@ -141,6 +141,7 @@ export default function CheckoutPage() {
   const [sessionError, setSessionError] = useState<string | null>(null)
 
   const [sender, setSender] = useState('')
+  const [senderOverridden, setSenderOverridden] = useState(false)
   const [linkedWallet, setLinkedWallet] = useState<LinkedWalletInfo | null>(null)
   const [walletLinkLoading, setWalletLinkLoading] = useState(false)
   const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -199,6 +200,7 @@ export default function CheckoutPage() {
         setTransactionKind('')
         setUserSignature('')
         setTxBuildState(null)
+        setSenderOverridden(false)
 
         const stored = readLinkedWallet(r.data.session.id)
         if (stored) {
@@ -210,6 +212,7 @@ export default function CheckoutPage() {
         setTransactionKind('')
         setUserSignature('')
         setTxBuildState(null)
+        setSenderOverridden(false)
 
         if (r.status === 410) {
           setSessionError('This checkout session expired. Create a fresh checkout session and open the new link.')
@@ -241,9 +244,9 @@ export default function CheckoutPage() {
     const stored = readLinkedWallet(sessionKey)
     if (stored) {
       setLinkedWallet(stored)
-      if (!sender) setSender(stored.address)
+      if (!senderOverridden) setSender(stored.address)
     }
-  }, [sender, sessionDetails?.id, sessionId])
+  }, [senderOverridden, sessionDetails?.id, sessionId])
 
   useEffect(() => {
     let cancelled = false
@@ -308,6 +311,7 @@ export default function CheckoutPage() {
 
     setLinkedWallet(walletInfo)
     setSender(accountAddress)
+    setSenderOverridden(false)
     setTransactionKind('')
     setUserSignature('')
     setTxBuildState(null)
@@ -680,8 +684,16 @@ export default function CheckoutPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               <Input label="Checkout session ID" value={sessionId} readOnly placeholder="Generated from merchant flow" />
               <Input label="Checkout token" value={checkoutToken} readOnly placeholder="Generated from merchant flow" />
-              <Input label="Linked wallet address" placeholder="0x..."
-                value={sender} onChange={(e) => setSender(e.target.value)} />
+              <Input
+                label="Sender address"
+                placeholder="0x..."
+                value={sender}
+                onChange={(e) => {
+                  setSender(e.target.value)
+                  setSenderOverridden(true)
+                }}
+                hint="Auto-filled from the linked wallet, but you can edit it to use a different account."
+              />
               <Input label="Gas cap (optional)" type="number" placeholder="Leave blank to use app policy"
                 value={maxGasBudget} onChange={(e) => setMaxGasBudget(e.target.value)} />
             </div>
