@@ -708,7 +708,7 @@ export default function CheckoutPage() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-blue-900">Transaction bytes</p>
-                  <p className="text-xs text-blue-500">Auto-generated from session intent and sender balance. Click "Regenerate bytes" if you need to update them.</p>
+                  <p className="text-xs text-blue-500">Auto-generated from session intent and sender balance. Click \"Regenerate bytes\" if you need to update them.</p>
                 </div>
                 <Button
                   variant="sm"
