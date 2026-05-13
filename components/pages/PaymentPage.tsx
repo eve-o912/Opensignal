@@ -22,11 +22,14 @@ import {
 import WalletPickerDialog from '@/components/ui/WalletPickerDialog'
 
 interface PaymentQuoteResponse {
-  gasBudget: number
-  sponsorAddress: string
-  network: string
-  purchaseAmountMist: number
-  recipient: string
+  gasBudget?: number
+  gas_budget?: number
+  estimatedGas?: number
+  quote?: { gasBudget?: number; gas_budget?: number; estimatedGas?: number }
+  sponsorAddress?: string
+  network?: string
+  purchaseAmountMist?: number
+  recipient?: string
 }
 
 interface PaymentSponsorResponse {
@@ -468,10 +471,21 @@ export default function PaymentPage() {
       )
 
       if (r.ok) {
+        // Handle both flat and nested response shapes from the server
+        const gas =
+          r.data.gasBudget ??
+          r.data.gas_budget ??
+          r.data.estimatedGas ??
+          r.data.quote?.gasBudget ??
+          r.data.quote?.gas_budget ??
+          r.data.quote?.estimatedGas
+
         setQuoteState({
           ok: true,
-          msg: `Gas budget estimated: ${r.data.gasBudget.toLocaleString()} MIST. Ready to sponsor.`,
-          data: r.data,
+          msg: gas != null
+            ? `Gas budget estimated: ${gas.toLocaleString()} MIST. Ready to sponsor.`
+            : 'Quote approved. Ready to sponsor.',
+          data: { ...r.data, gasBudget: gas ?? 0 },
         })
       } else {
         setQuoteState({ ok: false, msg: getApiErrorMessage(r.data, 'Failed to get payment quote.') })
