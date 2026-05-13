@@ -11,9 +11,10 @@ import AppsPage from '@/components/pages/AppsPage'
 import KeysPage from '@/components/pages/KeysPage'
 import SponsorPage from '@/components/pages/SponsorPage'
 import CheckoutPage from '@/components/pages/CheckoutPage'
+import PaymentPage from '@/components/pages/PaymentPage'
 import SettingsPage from '@/components/pages/SettingsPage'
 
-type Page = 'dashboard' | 'account' | 'apps' | 'keys' | 'sponsor' | 'checkout' | 'settings'
+type Page = 'dashboard' | 'account' | 'apps' | 'keys' | 'sponsor' | 'checkout' | 'payment' | 'settings'
 
 export default function Home() {
   const [active, setActive] = useState<Page>('dashboard')
@@ -32,6 +33,7 @@ export default function Home() {
       case 'keys':      return <KeysPage />
       case 'sponsor':   return <SponsorPage />
       case 'checkout':  return <CheckoutPage />
+      case 'payment':   return <PaymentPage />
       case 'settings':  return <SettingsPage />
     }
   }
@@ -54,7 +56,7 @@ export default function Home() {
             className={
               active === 'dashboard'
                 ? 'w-full'
-                : active === 'sponsor'
+                : active === 'sponsor' || active === 'payment'
                   ? 'w-full lg:w-[80%] mx-auto'
                   : 'w-full max-w-3xl mx-auto'
             }
