@@ -164,7 +164,7 @@ export default function PaymentPage() {
     return {
       hasRecipient: /^0x[a-fA-F0-9]{63,64}$/.test(recipientAddress),
       hasSender: /^0x[a-fA-F0-9]{63,64}$/.test(senderAddress),
-      hasAmount: parseInt(amount, 10) > 0,
+      hasAmount: parseFloat(amount) > 0,
       differentAddresses: senderAddress !== recipientAddress,
     }
   }, [senderAddress, recipientAddress, amount])
@@ -832,7 +832,7 @@ export default function PaymentPage() {
               variant="primary"
               onClick={getPaymentQuote}
               disabled={
-                quoteLoading || !validationComplete.hasSender || !validationComplete.hasRecipient || !validationComplete.hasAmount || !apiKey
+                quoteLoading || !validationComplete.hasSender || !validationComplete.hasRecipient || !validationComplete.hasAmount
               }
             >
               {quoteLoading ? 'Getting quote…' : 'Get gas quote'}
