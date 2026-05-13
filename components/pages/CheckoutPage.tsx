@@ -19,6 +19,7 @@ import {
   waitForInjectedWalletProviders,
   getWalletSigners,
   connectWalletAndGetAddress,
+  connectWalletAndGetAccount,
   getWalletMessageSigner,
   type InjectedWalletProvider,
 } from '@/lib/wallet'
@@ -483,14 +484,23 @@ export default function CheckoutPage() {
     const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
     const provider = preferred ?? providers[0]
 
-    const signers = provider ? getWalletSigners(provider) : []
-    if (!provider || signers.length === 0) {
+    if (!provider) {
+      throw new Error('No wallet provider is available for signing.')
+    }
+
+    const connectedAccount = await connectWalletAndGetAccount(provider)
+
+    const signers = getWalletSigners(provider)
+    if (signers.length === 0) {
       throw new Error('Connected wallet does not support transaction signing in this browser. Use a Sui wallet with signTransaction support.')
     }
 
     const chain = `sui:${sessionDetails?.network === 'mainnet' ? 'mainnet' : 'testnet'}`
-    const providerAccount = provider.accounts?.find((account) => account.address === sender) ?? provider.accounts?.[0]
-    const accountInput = providerAccount ?? { address: sender }
+    const providerAccount =
+      provider.accounts?.find((account) => account.address === sender) ??
+      provider.accounts?.find((account) => account.address === connectedAccount.address) ??
+      provider.accounts?.[0]
+    const accountInput = providerAccount ?? connectedAccount
 
     const attempts: Array<Record<string, unknown>> = [
       { transaction: bytesBase64, account: accountInput, chain },

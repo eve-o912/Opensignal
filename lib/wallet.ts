@@ -7,11 +7,23 @@ export interface InjectedWalletProvider {
   chains?: string[]
   features?: Record<string, unknown>
   accounts?: Array<{ address?: string; chains?: string[]; features?: string[] }>
-  connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string; chains?: string[] }> }>
+  connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<WalletConnectAccount> }>
   getAccounts?: () => Promise<Array<{ address?: string }>>
   signMessage?: (input: Record<string, unknown>) => Promise<{ signature?: string }>
   signTransaction?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
   signTransactionBlock?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+}
+
+export interface WalletAccount {
+  address: string
+  chains?: string[]
+  features?: string[]
+}
+
+interface WalletConnectAccount {
+  address?: string
+  chains?: string[]
+  features?: string[]
 }
 
 /**
@@ -126,37 +138,66 @@ export function getWalletMessageSigner(
 }
 
 /**
+ * Given a provider, calls standard:connect and returns the first connected account.
+ */
+export async function connectWalletAndGetAccount(
+  provider: InjectedWalletProvider
+): Promise<WalletAccount> {
+  const features = (provider.features ?? {}) as Record<string, unknown>
+  const connectFeature = features['standard:connect'] as
+    | { connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<WalletConnectAccount> }> }
+    | undefined
+
+  const connectFn = connectFeature?.connect ?? provider.connect
+
+  let account: WalletAccount | undefined
+
+  try {
+    const result = await connectFn?.({})
+    const connected = result?.accounts?.[0]
+    if (connected?.address) {
+      account = {
+        address: connected.address,
+        chains: connected.chains,
+        features: connected.features,
+      }
+    }
+  } catch {
+    // fallback: try already-authorized accounts
+    const fallback = provider.accounts?.[0]
+    if (fallback?.address) {
+      account = {
+        address: fallback.address,
+        chains: fallback.chains,
+        features: fallback.features,
+      }
+    }
+  }
+
+  if (!account) {
+    // last resort: getAccounts
+    const accounts = await provider.getAccounts?.()
+    const lastResort = accounts?.[0]
+    if (lastResort?.address) {
+      account = {
+        address: lastResort.address,
+      }
+    }
+  }
+
+  if (!account) {
+    throw new Error('Wallet did not return an account address.')
+  }
+
+  return account
+}
+
+/**
  * Given a provider, calls standard:connect and returns the first account address.
  */
 export async function connectWalletAndGetAddress(
   provider: InjectedWalletProvider
 ): Promise<string> {
-  const features = (provider.features ?? {}) as Record<string, unknown>
-  const connectFeature = features['standard:connect'] as
-    | { connect?: (args?: Record<string, unknown>) => Promise<{ accounts?: Array<{ address?: string }> }> }
-    | undefined
-
-  const connectFn = connectFeature?.connect ?? provider.connect
-
-  let address: string | undefined
-
-  try {
-    const result = await connectFn?.({})
-    address = result?.accounts?.[0]?.address
-  } catch {
-    // fallback: try already-authorized accounts
-    address = provider.accounts?.[0]?.address
-  }
-
-  if (!address) {
-    // last resort: getAccounts
-    const accounts = await provider.getAccounts?.()
-    address = accounts?.[0]?.address
-  }
-
-  if (!address) {
-    throw new Error('Wallet did not return an account address.')
-  }
-
-  return address
+  const account = await connectWalletAndGetAccount(provider)
+  return account.address
 }

@@ -16,6 +16,7 @@ import {
   waitForInjectedWalletProviders,
   getWalletSigners,
   connectWalletAndGetAddress,
+  connectWalletAndGetAccount,
   getWalletMessageSigner,
   type InjectedWalletProvider,
 } from '@/lib/wallet'
@@ -363,7 +364,7 @@ export default function PaymentPage() {
     setSponsorState(null)
     try {
       // Establish an active session — required before the wallet will accept signing calls
-      await connectWalletAndGetAddress(provider)
+      const connectedAccount = await connectWalletAndGetAccount(provider)
 
       const signers = getWalletSigners(provider)
       if (signers.length === 0) {
@@ -371,8 +372,11 @@ export default function PaymentPage() {
       }
 
       const chain = `sui:${network}`
-      const providerAccount = provider.accounts?.find((account) => account.address === senderAddress) ?? provider.accounts?.[0]
-      const accountInput = providerAccount ?? { address: senderAddress }
+      const providerAccount =
+        provider.accounts?.find((account) => account.address === senderAddress) ??
+        provider.accounts?.find((account) => account.address === connectedAccount.address) ??
+        provider.accounts?.[0]
+      const accountInput = providerAccount ?? connectedAccount
 
       const attempts: Array<Record<string, unknown>> = [
         { transaction: transactionBytes, account: accountInput, chain },
