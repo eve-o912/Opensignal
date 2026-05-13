@@ -195,6 +195,7 @@ export default function PaymentPage() {
 
   // Restore linked wallet from storage on mount
   useEffect(() => {
+    if (typeof window === 'undefined') return
     const stored = readLinkedWallet('default')
     if (stored) {
       setLinkedWallet(stored)
@@ -202,6 +203,50 @@ export default function PaymentPage() {
       setSenderOverridden(false)
     }
   }, [])
+
+  // Once wallet providers are detected, auto-connect the active account to
+  // populate the sender address without requiring a manual "Link wallet" click.
+  useEffect(() => {
+    if (walletProviders.length === 0) return
+
+    async function autoLoadAddress() {
+      // Prefer the previously linked wallet provider, otherwise use the first
+      const preferred = linkedWallet
+        ? walletProviders.find((p) => p.name === linkedWallet!.provider)
+        : undefined
+      const provider = preferred ?? walletProviders[0]
+      if (!provider) return
+
+      // If the provider already has accounts exposed (no user prompt needed),
+      // use the first one to pre-fill the sender field.
+      const existingAccounts = provider.accounts
+      if (!existingAccounts || existingAccounts.length === 0) return
+
+      const address = existingAccounts[0].address
+      if (!address) return
+
+      // Only auto-fill if the user hasn't manually typed a different address
+      setSenderOverridden((overridden) => {
+        if (!overridden) {
+          setSenderAddress(address)
+          // Persist so the next page load restores instantly from localStorage
+          if (!linkedWallet) {
+            const walletInfo: LinkedWalletInfo = {
+              address,
+              provider: provider.name?.trim() || 'Sui wallet',
+            }
+            saveLinkedWallet('default', walletInfo)
+            setLinkedWallet(walletInfo)
+          }
+        }
+        return overridden
+      })
+    }
+
+    autoLoadAddress()
+  // walletProviders identity changes each poll; we only want to react to it
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletProviders])
 
   async function performLinkWallet(provider: InjectedWalletProvider) {
     const accountAddress = await connectWalletAndGetAddress(provider)
@@ -830,9 +875,9 @@ export default function PaymentPage() {
             {transactionBytes && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900 mt-3">
                 <p className="font-semibold mb-2">Transaction bytes generated</p>
-                <pre className="font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
+                <div className="font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto">
                   {transactionBytes.substring(0, 100)}...
-                </pre>
+                </div>
               </div>
             )}
 

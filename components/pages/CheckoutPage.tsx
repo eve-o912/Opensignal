@@ -199,12 +199,20 @@ export default function CheckoutPage() {
         setTransactionKind('')
         setUserSignature('')
         setTxBuildState(null)
-        setSenderOverridden(false)
 
-        const stored = readLinkedWallet(r.data.session.id)
+        // Resolve linked wallet using both the canonical session id and the
+        // URL param as a fallback (they are the same value, but this makes the
+        // lookup robust to any timing difference).
+        const sessionKey = r.data.session.id || sessionId
+        const stored = readLinkedWallet(sessionKey)
         if (stored) {
           setLinkedWallet(stored)
           setSender(stored.address)
+          setSenderOverridden(false)
+        } else {
+          // No linked wallet yet — reset override flag so that once the user
+          // does link a wallet the address auto-fills correctly.
+          setSenderOverridden(false)
         }
       } else {
         setSessionDetails(null)
@@ -295,19 +303,6 @@ export default function CheckoutPage() {
 
     return () => clearTimeout(timer)
   }, [sessionDetails, sender, transactionKind, txBuildLoading, buildTransactionKindFromIntent])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const sessionKey = sessionDetails?.id || sessionId
-    if (!sessionKey) return
-
-    const stored = readLinkedWallet(sessionKey)
-    if (stored) {
-      setLinkedWallet(stored)
-      if (!senderOverridden) setSender(stored.address)
-    }
-  }, [senderOverridden, sessionDetails?.id, sessionId])
 
   useEffect(() => {
     let cancelled = false
@@ -724,9 +719,9 @@ export default function CheckoutPage() {
                 </div>
               )}
               {transactionKind && (
-                <pre className="mt-3 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border bg-blue-50 border-blue-100 text-blue-900">
+                <div className="mt-3 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border bg-blue-50 border-blue-100 text-blue-900">
                   {transactionKind}
-                </pre>
+                </div>
               )}
             </div>
             <div className="mt-4 flex items-center gap-2 flex-wrap">
