@@ -193,14 +193,15 @@ export default function PaymentPage() {
     }
   }, [])
 
-  // Restore linked wallet from storage
+  // Restore linked wallet from storage on mount
   useEffect(() => {
     const stored = readLinkedWallet('default')
     if (stored) {
       setLinkedWallet(stored)
-      if (!senderOverridden) setSenderAddress(stored.address)
+      setSenderAddress(stored.address)
+      setSenderOverridden(false)
     }
-  }, [senderOverridden])
+  }, [])
 
   async function performLinkWallet(provider: InjectedWalletProvider) {
     const accountAddress = await connectWalletAndGetAddress(provider)
@@ -691,8 +692,25 @@ export default function PaymentPage() {
                   setSenderAddress(e.target.value)
                   setSenderOverridden(true)
                 }}
-                hint="Auto-filled from linked wallet, but you can override it."
+                hint={senderOverridden ? 'Overridden from linked wallet' : 'Auto-loaded from your linked wallet. Edit to use a different account.'}
               />
+              {senderAddress && linkedWallet && !senderOverridden && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-50 border border-green-200 text-xs text-green-900">
+                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M13.5 2.5L6 10l-3.5-3.5"/>
+                  </svg>
+                  <span>Using default account from linked wallet</span>
+                </div>
+              )}
+              {senderOverridden && linkedWallet && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                  <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="8" cy="8" r="5.5"/>
+                    <path d="M8 5v3M7 9h2"/>
+                  </svg>
+                  <span>Using custom account (not your linked wallet)</span>
+                </div>
+              )}
             </div>
 
             <div className="mt-4">
