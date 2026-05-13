@@ -368,8 +368,8 @@ export default function PaymentPage() {
   }
 
   async function verifyBalances() {
-    if (!validationComplete.hasSender || !validationComplete.hasRecipient) {
-      setBalanceError('Please enter valid sender and recipient addresses.')
+    if (!validationComplete.hasSender) {
+      setBalanceError('Please enter a valid sender address.')
       return
     }
 
@@ -377,23 +377,25 @@ export default function PaymentPage() {
     setBalanceError(null)
 
     try {
-      const [sender, recipient] = await Promise.all([
-        fetchBalance(senderAddress),
-        fetchBalance(recipientAddress),
-      ])
+      const senderBal = await fetchBalance(senderAddress)
+      setSenderBalance(senderBal)
 
-      const senderBal = BigInt(sender.totalBalance)
-      const requiredAmount = BigInt(amount) * BigInt(1000000) // Convert to MIST
+      // Also fetch recipient balance if address is already filled in
+      if (validationComplete.hasRecipient) {
+        const recipientBal = await fetchBalance(recipientAddress)
+        setRecipientBalance(recipientBal)
 
-      if (senderBal < requiredAmount) {
-        setBalanceError(`Sender balance (${(senderBal / BigInt(1000000000)).toString()} SUI) is insufficient for the payment.`)
-        setSenderBalance(null)
+        if (validationComplete.hasAmount) {
+          const senderBalBig = BigInt(senderBal.totalBalance)
+          const requiredAmount = BigInt(Math.round(parseFloat(amount) * 1_000_000_000))
+          if (senderBalBig < requiredAmount) {
+            setBalanceError(`Sender balance (${(senderBalBig / BigInt(1_000_000_000)).toString()} SUI) is insufficient for the payment.`)
+          }
+        }
+      } else {
         setRecipientBalance(null)
-        return
       }
 
-      setSenderBalance(sender)
-      setRecipientBalance(recipient)
       setBalanceError(null)
     } catch (error) {
       setBalanceError(error instanceof Error ? error.message : 'Failed to verify balances.')
@@ -758,7 +760,7 @@ export default function PaymentPage() {
               <Button
                 variant="primary"
                 onClick={verifyBalances}
-                disabled={balanceLoading || !validationComplete.hasSender || !validationComplete.hasRecipient}
+                disabled={balanceLoading || !validationComplete.hasSender}
               >
                 {balanceLoading ? 'Checking…' : 'Verify balances'}
               </Button>
