@@ -614,13 +614,23 @@ export default function PaymentPage() {
       setSignLoading(true)
       setSponsorLoading(false)
       try {
-        const providers = await waitForInjectedWalletProviders()
+        const providers = await waitForInjectedWalletProviders(1000)
         const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
         const provider = preferred ?? providers[0]
 
-        const signers = provider ? getWalletSigners(provider) : []
-        if (!provider || signers.length === 0) {
+        if (!provider) {
           throw new Error('No Sui wallet extension detected. Install Slush, refresh the page, and allow the extension on this site.')
+        }
+
+        // connectWalletAndGetAddress establishes an active session with the extension.
+        // Without this call the wallet is detected but not connected, so getWalletSigners
+        // returns functions that the wallet will silently reject (no active session).
+        // This mirrors exactly what performLinkWallet does before signing a message.
+        await connectWalletAndGetAddress(provider)
+
+        const signers = getWalletSigners(provider)
+        if (signers.length === 0) {
+          throw new Error('This wallet does not support transaction signing.')
         }
 
         const chain = `sui:${network}`
