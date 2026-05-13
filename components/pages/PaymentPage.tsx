@@ -248,9 +248,13 @@ export default function PaymentPage() {
   }, [walletProviders, walletAddress])
 
   async function performLinkWallet(provider: InjectedWalletProvider) {
-    const accountAddress = await connectWalletAndGetAddress(provider)
+    const rawAddress = await connectWalletAndGetAddress(provider)
 
-    if (!/^0x[a-fA-F0-9]{63,64}$/.test(accountAddress)) {
+    // Normalize to lowercase immediately — Sui addresses are case-insensitive hex.
+    // This mirrors the same normalization used in AccountPage for wallet login.
+    const accountAddress = rawAddress.toLowerCase()
+
+    if (!/^0x[a-fA-F0-9]{64}$/.test(accountAddress)) {
       throw new Error('Invalid wallet address format received from wallet.')
     }
 
@@ -293,17 +297,19 @@ export default function PaymentPage() {
 
   async function linkWallet() {
     setWalletLinkState(null)
+    setWalletLinkLoading(true)
 
     try {
-      setWalletLinkLoading(true)
       let providers = walletProviders
       if (!providers.length) {
-        providers = await waitForInjectedWalletProviders()
+        // Use the same 1 000 ms timeout as AccountPage so detection is consistent
+        providers = await waitForInjectedWalletProviders(1000)
         setWalletProviders(providers)
         setWalletNames(providers.map((wallet) => wallet.name?.trim() || 'Sui wallet'))
       }
 
       if (providers.length > 1) {
+        // Open picker and return — loading stays true until confirmSelectedWallet finishes
         setWalletPickerOpen(true)
         return
       }
@@ -318,8 +324,11 @@ export default function PaymentPage() {
       setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
       console.error('Wallet link error:', error)
     } finally {
-      setWalletLinkLoading(false)
-      setWalletPickerOpen(false)
+      // Only clear loading here if the picker was NOT opened.
+      // When the picker is open, confirmSelectedWallet owns the loading state.
+      if (!walletPickerOpen) {
+        setWalletLinkLoading(false)
+      }
     }
   }
 
