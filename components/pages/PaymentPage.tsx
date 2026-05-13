@@ -61,6 +61,7 @@ interface PaymentResult {
   userSignature: string
   sponsorSignature: string
   transactionBytes: string
+  transactionDigest: string
   sender: string
   recipient: string
   amount: number
@@ -702,7 +703,7 @@ export default function PaymentPage() {
   }
 
   async function executePayment() {
-    if (!userSignature || !transactionBytes) {
+    if (!userSignature || !sponsorSignature || !transactionBytes) {
       setSubmissionState({ ok: false, msg: 'Transaction not ready. Please complete sponsorship and signing.' })
       return
     }
@@ -711,12 +712,26 @@ export default function PaymentPage() {
     setSubmissionState(null)
 
     try {
-      // In a real scenario, you would submit the signed transaction to the blockchain here
-      // For now, we'll simulate the result
+      const rpcUrl = resolveRpcUrl(network)
+      const client = new SuiJsonRpcClient({ url: rpcUrl, network })
+
+      const executionResponse = await client.executeTransactionBlock({
+        transactionBlock: transactionBytes,
+        signature: [userSignature, sponsorSignature],
+        options: {
+          showEffects: true,
+          showObjectChanges: true,
+          showEvents: true,
+        },
+      })
+
+      const transactionDigest = (executionResponse as { digest?: string }).digest ?? ''
+
       setPaymentResult({
         userSignature,
         sponsorSignature,
         transactionBytes,
+        transactionDigest,
         sender: senderAddress,
         recipient: recipientAddress,
         amount: parseInt(amount, 10),
@@ -725,11 +740,12 @@ export default function PaymentPage() {
 
       setSubmissionState({
         ok: true,
-        msg: `✓ Payment prepared: ${amount} SUI from sender to recipient. Gas sponsored by OpenSignal.`,
+        msg: transactionDigest
+          ? `✓ Payment submitted on chain. Digest: ${transactionDigest}`
+          : '✓ Payment submitted on chain.',
       })
 
-      // Refresh balances to show the impact
-      setTimeout(() => verifyBalances(), 1000)
+      await verifyBalances()
     } catch (error) {
       setSubmissionState({
         ok: false,
@@ -1009,6 +1025,12 @@ export default function PaymentPage() {
                     <p className="text-xs font-semibold text-green-700 mb-1">GAS BUDGET</p>
                     <p className="text-sm">{paymentResult.gasBudget} MIST</p>
                   </div>
+                  {paymentResult.transactionDigest && (
+                    <div className="col-span-2">
+                      <p className="text-xs font-semibold text-green-700 mb-1">TX DIGEST</p>
+                      <p className="font-mono text-[11px] break-all">{paymentResult.transactionDigest}</p>
+                    </div>
+                  )}
                 </div>
                 <div className="pt-3 border-t border-green-200">
                   <p className="text-xs font-semibold text-green-700 mb-2">IMPACT:</p>
