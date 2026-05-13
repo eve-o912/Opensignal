@@ -377,14 +377,13 @@ export default function PaymentPage() {
         provider.accounts?.find((account) => account.address === connectedAccount.address) ??
         provider.accounts?.[0]
       const accountInput = providerAccount ?? connectedAccount
+      const walletTransaction = Transaction.from(transactionBytes)
 
       const attempts: Array<Record<string, unknown>> = [
-        { transaction: transactionBytes, account: accountInput, chain },
-        { transaction: base64ToBytes(transactionBytes), account: accountInput, chain },
-        { transaction: transactionBytes, chain },
-        { transactionBlock: transactionBytes, account: accountInput, chain },
-        { transactionBlock: base64ToBytes(transactionBytes), account: accountInput, chain },
-        { transactionBlock: transactionBytes, chain },
+        { transaction: walletTransaction, account: accountInput, chain },
+        { transactionBlock: walletTransaction, account: accountInput, chain },
+        { transaction: walletTransaction, chain },
+        { transactionBlock: walletTransaction, chain },
       ]
 
       let userSig = ''

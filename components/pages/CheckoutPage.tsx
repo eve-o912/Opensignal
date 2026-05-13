@@ -501,14 +501,13 @@ export default function CheckoutPage() {
       provider.accounts?.find((account) => account.address === connectedAccount.address) ??
       provider.accounts?.[0]
     const accountInput = providerAccount ?? connectedAccount
+    const walletTransaction = Transaction.from(bytesBase64)
 
     const attempts: Array<Record<string, unknown>> = [
-      { transaction: bytesBase64, account: accountInput, chain },
-      { transaction: base64ToBytes(bytesBase64), account: accountInput, chain },
-      { transaction: bytesBase64, chain },
-      { transactionBlock: bytesBase64, account: accountInput, chain },
-      { transactionBlock: base64ToBytes(bytesBase64), account: accountInput, chain },
-      { transactionBlock: bytesBase64, chain },
+      { transaction: walletTransaction, account: accountInput, chain },
+      { transactionBlock: walletTransaction, account: accountInput, chain },
+      { transaction: walletTransaction, chain },
+      { transactionBlock: walletTransaction, chain },
     ]
 
     for (const signer of signers) {
