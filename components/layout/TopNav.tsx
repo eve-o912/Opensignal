@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import LogoGem from './LogoGem'
 import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
 import { useAuth } from '@/context/AuthContext'
 import Logo from '../../public/logo.png'
 
@@ -13,7 +14,11 @@ interface Props {
 }
 
 export default function TopNav({ activePage, onNav, onMenuToggle }: Props) {
-  const { jwt } = useAuth()
+  const { jwt, setJwt } = useAuth()
+
+  function handleLogout() {
+    setJwt(null)
+  }
 
   return (
     <nav className="flex items-center justify-between px-6 h-14 border-b border-white sticky top-0 z-10">
@@ -25,8 +30,32 @@ export default function TopNav({ activePage, onNav, onMenuToggle }: Props) {
       </div>
       <div className="hidden md:flex items-center rounded-xl py-2 px-1 gap-2.5">
         <span className="text-sm text-black ml-1">
-          {jwt ? <Badge variant="ok">Signed in</Badge> : <span className="text-black">Not signed in</span>}
+          {jwt ? (
+            <div className="flex items-center gap-2.5">
+              <Badge variant="ok">Signed in</Badge>
+              <Button 
+                variant="sm" 
+                onClick={handleLogout}
+                className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200"
+              >
+                Logout
+              </Button>
+            </div>
+          ) : (
+            <span className="text-black">Not signed in</span>
+          )}
         </span>
+      </div>
+      <div className="md:hidden flex items-center gap-2">
+        {jwt && (
+          <Button 
+            variant="sm" 
+            onClick={handleLogout}
+            className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs"
+          >
+            Logout
+          </Button>
+        )}
       </div>
     </nav>
   )
