@@ -42,13 +42,15 @@ interface LinkedWalletInfo {
   message?: string
 }
 
+interface CoinObject {
+  coinObjectId: string
+  balance: string
+  coinType: string
+}
+
 interface WalletBalance {
   totalBalance: string
-  coinObjects: Array<{
-    coinObjectId: string
-    balance: string
-    coinType: string
-  }>
+  coinObjects: CoinObject[]
 }
 
 interface PaymentResult {
@@ -308,11 +310,11 @@ export default function PaymentPage() {
         limit: 50,
       })
 
-      const totalBalance = coins.data.reduce((sum, coin: any) => sum + BigInt(coin.balance), BigInt(0))
+      const totalBalance = coins.data.reduce((sum, coin: CoinObject) => sum + BigInt(coin.balance), BigInt(0))
 
       return {
         totalBalance: totalBalance.toString(),
-        coinObjects: coins.data.map((coin: any) => ({
+        coinObjects: coins.data.map((coin: CoinObject) => ({
           coinObjectId: coin.coinObjectId,
           balance: coin.balance,
           coinType: coin.coinType,
@@ -429,7 +431,7 @@ export default function PaymentPage() {
         limit: 50,
       })
 
-      const spendCoin = coins.data.find((coin: any) => BigInt(coin.balance) >= amountMist)
+      const spendCoin = coins.data.find((coin: CoinObject) => BigInt(coin.balance) >= amountMist)
       if (!spendCoin) {
         throw new Error('Sender wallet has insufficient SUI balance for this payment amount.')
       }
