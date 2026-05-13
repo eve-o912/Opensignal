@@ -117,6 +117,35 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
+/** Decode a JWT and return its payload, or null if malformed. */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = token.split('.')[1]
+    if (!part) return null
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=')
+    return JSON.parse(atob(padded)) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** Extract the Sui wallet address from a JWT payload, trying common claim names. */
+function walletAddressFromJwt(token: string): string | null {
+  const payload = decodeJwtPayload(token)
+  if (!payload) return null
+  const candidates = [
+    payload.walletAddress,
+    payload.wallet_address,
+    payload.address,
+    payload.suiAddress,
+    payload.sui_address,
+  ]
+  for (const c of candidates) {
+    if (typeof c === 'string' && /^0x[a-fA-F0-9]{63,64}$/.test(c)) return c
+  }
+  return null
+}
+
 export default function PaymentPage() {
   const { jwt } = useAuth()
   const [apiKey, setApiKey] = useState('')
@@ -193,58 +222,60 @@ export default function PaymentPage() {
     }
   }, [])
 
-  // Restore linked wallet from storage on mount
+  // Auto-fill sender address from the signed-in account.
+  // Priority: 1) JWT wallet address claim  2) localStorage linked wallet
+  // 3) injected wallet extension accounts (if browser wallet is connected)
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const stored = readLinkedWallet('default')
-    if (stored) {
-      setLinkedWallet(stored)
-      setSenderAddress(stored.address)
-      setSenderOverridden(false)
-    }
-  }, [])
+    if (senderOverridden) return
 
-  // Once wallet providers are detected, auto-connect the active account to
-  // populate the sender address without requiring a manual "Link wallet" click.
+    // 1. Try to read the address straight from the JWT payload
+    if (jwt) {
+      const jwtAddress = walletAddressFromJwt(jwt)
+      if (jwtAddress) {
+        setSenderAddress(jwtAddress)
+        return
+      }
+    }
+
+    // 2. Fall back to localStorage (covers wallet-login sessions)
+    if (typeof window !== 'undefined') {
+      const stored = readLinkedWallet('default')
+      if (stored) {
+        setLinkedWallet(stored)
+        setSenderAddress(stored.address)
+        return
+      }
+    }
+  }, [jwt, senderOverridden])
+
+  // 3. If still no address, try the injected wallet extension accounts list
+  //    (no approval prompt — only reads already-connected accounts)
   useEffect(() => {
+    if (senderOverridden) return
     if (walletProviders.length === 0) return
 
-    async function autoLoadAddress() {
-      // Prefer the previously linked wallet provider, otherwise use the first
-      const preferred = linkedWallet
-        ? walletProviders.find((p) => p.name === linkedWallet!.provider)
-        : undefined
-      const provider = preferred ?? walletProviders[0]
-      if (!provider) return
+    const preferred = linkedWallet
+      ? walletProviders.find((p) => p.name === linkedWallet.provider)
+      : undefined
+    const provider = preferred ?? walletProviders[0]
+    if (!provider) return
 
-      // If the provider already has accounts exposed (no user prompt needed),
-      // use the first one to pre-fill the sender field.
-      const existingAccounts = provider.accounts
-      if (!existingAccounts || existingAccounts.length === 0) return
+    const accounts = provider.accounts
+    if (!accounts || accounts.length === 0) return
 
-      const address = existingAccounts[0].address
-      if (!address) return
+    const address = accounts[0].address
+    if (!address) return
 
-      // Only auto-fill if the user hasn't manually typed a different address
-      setSenderOverridden((overridden) => {
-        if (!overridden) {
-          setSenderAddress(address)
-          // Persist so the next page load restores instantly from localStorage
-          if (!linkedWallet) {
-            const walletInfo: LinkedWalletInfo = {
-              address,
-              provider: provider.name?.trim() || 'Sui wallet',
-            }
-            saveLinkedWallet('default', walletInfo)
-            setLinkedWallet(walletInfo)
-          }
-        }
-        return overridden
-      })
-    }
-
-    autoLoadAddress()
-  // walletProviders identity changes each poll; we only want to react to it
+    setSenderAddress((current) => {
+      if (current || senderOverridden) return current
+      // Persist so future visits restore from localStorage
+      if (!linkedWallet) {
+        const walletInfo: LinkedWalletInfo = { address, provider: provider.name?.trim() || 'Sui wallet' }
+        saveLinkedWallet('default', walletInfo)
+        setLinkedWallet(walletInfo)
+      }
+      return address
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletProviders])
 
