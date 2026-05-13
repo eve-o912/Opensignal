@@ -421,17 +421,46 @@ export default function PaymentPage() {
     setQuoteState(null)
 
     try {
-      const amountMist = parseInt(amount, 10) * 1000000
+      const amountMist = BigInt(Math.round(parseFloat(amount) * 1_000_000_000))
 
-      // Call the sponsor quote endpoint
+      // Build the transaction kind bytes first — the quote endpoint requires them
+      const rpcUrl = resolveRpcUrl(network)
+      const client = new SuiJsonRpcClient({ url: rpcUrl, network })
+
+      const coins = await client.getCoins({
+        owner: senderAddress,
+        coinType: '0x2::sui::SUI',
+        limit: 50,
+      })
+
+      const spendCoin = coins.data.find((coin: CoinObject) => BigInt(coin.balance) >= amountMist)
+      if (!spendCoin) {
+        throw new Error('Sender wallet has insufficient SUI balance for this payment amount.')
+      }
+
+      const tx = new Transaction()
+      tx.setSender(senderAddress)
+      const [paymentCoin] = tx.splitCoins(
+        tx.object(spendCoin.coinObjectId),
+        [tx.pure.u64(amountMist.toString())],
+      )
+      tx.moveCall({
+        target: '0x2::transfer::public_transfer',
+        typeArguments: ['0x2::coin::Coin<0x2::sui::SUI>'],
+        arguments: [paymentCoin, tx.pure.address(recipientAddress)],
+      })
+      const kindBytes = await tx.build({ client, onlyTransactionKind: true })
+      const kindBase64 = bytesToBase64(kindBytes)
+
+      // Store the bytes so Step 3 can use them directly without rebuilding
+      setTransactionBytes(kindBase64)
+
       const r = await apiCall<PaymentQuoteResponse>(
         'POST',
         '/v1/sponsor/quote',
         {
-          transactionKind: '', // Will be generated
+          transactionKind: kindBase64,
           sender: senderAddress,
-          purchaseAmountMist: amountMist,
-          recipient: recipientAddress,
           network,
         },
         undefined,
@@ -441,7 +470,7 @@ export default function PaymentPage() {
       if (r.ok) {
         setQuoteState({
           ok: true,
-          msg: `Gas budget estimated: ${r.data.gasBudget} MIST`,
+          msg: `Gas budget estimated: ${r.data.gasBudget.toLocaleString()} MIST. Ready to sponsor.`,
           data: r.data,
         })
       } else {
@@ -466,7 +495,7 @@ export default function PaymentPage() {
     try {
       const rpcUrl = resolveRpcUrl(network)
       const client = new SuiJsonRpcClient({ url: rpcUrl, network })
-      const amountMist = BigInt(amount) * BigInt(1000000)
+      const amountMist = BigInt(Math.round(parseFloat(amount) * 1_000_000_000))
 
       // Find a coin with sufficient balance
       const coins = await client.getCoins({
