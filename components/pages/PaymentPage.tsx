@@ -573,7 +573,7 @@ export default function PaymentPage() {
 
     try {
       // Get sponsor signature
-      const amountMist = parseInt(amount, 10) * 1000000
+      const amountMist = Math.round(parseFloat(amount) * 1_000_000_000)
       const sponsorRes = await apiCall<PaymentSponsorResponse>(
         'POST',
         '/v1/sponsor/sign',
@@ -590,7 +590,6 @@ export default function PaymentPage() {
 
       if (!sponsorRes.ok) {
         setSponsorState({ ok: false, msg: getApiErrorMessage(sponsorRes.data, 'Sponsor failed to sign.') })
-        setSponsorLoading(false)
         return
       }
 
@@ -604,6 +603,7 @@ export default function PaymentPage() {
 
       // Now sign with user's wallet
       setSignLoading(true)
+      setSponsorLoading(false)
       try {
         const providers = await waitForInjectedWalletProviders()
         const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
@@ -611,7 +611,7 @@ export default function PaymentPage() {
 
         const signers = provider ? getWalletSigners(provider) : []
         if (!provider || signers.length === 0) {
-          throw new Error('Connected wallet does not support transaction signing.')
+          throw new Error('No Sui wallet extension detected. Install Slush, refresh the page, and allow the extension on this site.')
         }
 
         const chain = `sui:${network}`
@@ -651,7 +651,6 @@ export default function PaymentPage() {
         setUserSignature(userSig)
         setSponsorState({ ok: true, msg: 'Transaction signed by user and sponsor successfully.' })
       } catch (signError) {
-        setUserSignature('')
         setSponsorState({
           ok: false,
           msg: signError instanceof Error ? signError.message : 'Failed to sign transaction.',
@@ -661,6 +660,7 @@ export default function PaymentPage() {
       }
     } catch (error) {
       setSponsorState({ ok: false, msg: error instanceof Error ? error.message : 'Sponsorship failed.' })
+    } finally {
       setSponsorLoading(false)
     }
   }
