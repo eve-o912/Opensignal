@@ -136,6 +136,7 @@ export default function PaymentPage() {
   const [walletProviders, setWalletProviders] = useState<InjectedWalletProvider[]>([])
   const [walletNames, setWalletNames] = useState<string[]>([])
   const [walletPickerOpen, setWalletPickerOpen] = useState(false)
+  const [walletPickerMode, setWalletPickerMode] = useState<'link' | 'sign'>('link')
   const [selectedWalletIndex, setSelectedWalletIndex] = useState(0)
   const [walletLinkLoading, setWalletLinkLoading] = useState(false)
   const [walletLinkState, setWalletLinkState] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -339,17 +340,79 @@ export default function PaymentPage() {
       return
     }
 
-    setWalletLinkLoading(true)
     setWalletPickerOpen(false)
-    setWalletLinkState(null)
 
+    if (walletPickerMode === 'sign') {
+      await signWithProvider(provider)
+    } else {
+      setWalletLinkLoading(true)
+      setWalletLinkState(null)
+      try {
+        await performLinkWallet(provider)
+      } catch (error) {
+        setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
+        console.error('Wallet link error:', error)
+      } finally {
+        setWalletLinkLoading(false)
+      }
+    }
+  }
+
+  async function signWithProvider(provider: InjectedWalletProvider) {
+    setSignLoading(true)
+    setSponsorState(null)
     try {
-      await performLinkWallet(provider)
+      // Establish an active session — required before the wallet will accept signing calls
+      await connectWalletAndGetAddress(provider)
+
+      const signers = getWalletSigners(provider)
+      if (signers.length === 0) {
+        throw new Error('This wallet does not support transaction signing.')
+      }
+
+      const chain = `sui:${network}`
+      const providerAccount = provider.accounts?.find((account) => account.address === senderAddress) ?? provider.accounts?.[0]
+      const accountInput = providerAccount ?? { address: senderAddress }
+
+      const attempts: Array<Record<string, unknown>> = [
+        { transaction: transactionBytes, account: accountInput, chain },
+        { transaction: base64ToBytes(transactionBytes), account: accountInput, chain },
+        { transaction: transactionBytes, chain },
+        { transactionBlock: transactionBytes, account: accountInput, chain },
+        { transactionBlock: base64ToBytes(transactionBytes), account: accountInput, chain },
+        { transactionBlock: transactionBytes, chain },
+      ]
+
+      let userSig = ''
+      for (const signer of signers) {
+        for (const input of attempts) {
+          try {
+            const result = await signer(input)
+            const signature = extractSignature(result)
+            if (signature) {
+              userSig = signature
+              break
+            }
+          } catch {
+            // Try next variant
+          }
+        }
+        if (userSig) break
+      }
+
+      if (!userSig) {
+        throw new Error('Wallet rejected transaction signing.')
+      }
+
+      setUserSignature(userSig)
+      setSponsorState({ ok: true, msg: 'Transaction signed by user and sponsor successfully.' })
     } catch (error) {
-      setWalletLinkState({ ok: false, msg: error instanceof Error ? error.message : 'Wallet link failed.' })
-      console.error('Wallet link error:', error)
+      setSponsorState({
+        ok: false,
+        msg: error instanceof Error ? error.message : 'Failed to sign transaction.',
+      })
     } finally {
-      setWalletLinkLoading(false)
+      setSignLoading(false)
     }
   }
 
@@ -581,7 +644,7 @@ export default function PaymentPage() {
     setSponsorState(null)
 
     try {
-      // Get sponsor signature
+      // Step 1: get the sponsor signature from the API
       const amountMist = Math.round(parseFloat(amount) * 1_000_000_000)
       const sponsorRes = await apiCall<PaymentSponsorResponse>(
         'POST',
@@ -610,73 +673,24 @@ export default function PaymentPage() {
         setTransactionBytes(sponsorRes.data.transactionBytes)
       }
 
-      // Now sign with user's wallet
-      setSignLoading(true)
-      setSponsorLoading(false)
-      try {
-        const providers = await waitForInjectedWalletProviders(1000)
-        const preferred = providers.find((provider) => provider.name === linkedWallet?.provider)
-        const provider = preferred ?? providers[0]
-
-        if (!provider) {
-          throw new Error('No Sui wallet extension detected. Install Slush, refresh the page, and allow the extension on this site.')
-        }
-
-        // connectWalletAndGetAddress establishes an active session with the extension.
-        // Without this call the wallet is detected but not connected, so getWalletSigners
-        // returns functions that the wallet will silently reject (no active session).
-        // This mirrors exactly what performLinkWallet does before signing a message.
-        await connectWalletAndGetAddress(provider)
-
-        const signers = getWalletSigners(provider)
-        if (signers.length === 0) {
-          throw new Error('This wallet does not support transaction signing.')
-        }
-
-        const chain = `sui:${network}`
-        const providerAccount = provider.accounts?.find((account) => account.address === senderAddress) ?? provider.accounts?.[0]
-        const accountInput = providerAccount ?? { address: senderAddress }
-
-        const attempts: Array<Record<string, unknown>> = [
-          { transaction: transactionBytes, account: accountInput, chain },
-          { transaction: base64ToBytes(transactionBytes), account: accountInput, chain },
-          { transaction: transactionBytes, chain },
-          { transactionBlock: transactionBytes, account: accountInput, chain },
-          { transactionBlock: base64ToBytes(transactionBytes), account: accountInput, chain },
-          { transactionBlock: transactionBytes, chain },
-        ]
-
-        let userSig = ''
-        for (const signer of signers) {
-          for (const input of attempts) {
-            try {
-              const result = await signer(input)
-              const signature = extractSignature(result)
-              if (signature) {
-                userSig = signature
-                break
-              }
-            } catch {
-              // Try next variant
-            }
-          }
-          if (userSig) break
-        }
-
-        if (!userSig) {
-          throw new Error('Wallet rejected transaction signing.')
-        }
-
-        setUserSignature(userSig)
-        setSponsorState({ ok: true, msg: 'Transaction signed by user and sponsor successfully.' })
-      } catch (signError) {
-        setSponsorState({
-          ok: false,
-          msg: signError instanceof Error ? signError.message : 'Failed to sign transaction.',
-        })
-      } finally {
-        setSignLoading(false)
+      // Step 2: open the wallet picker so the user chooses which wallet to sign with.
+      // Always show the picker — never silently pick providers[0] — because the user
+      // may have multiple extensions installed and needs to choose the right one.
+      const providers = await waitForInjectedWalletProviders(1000)
+      if (providers.length === 0) {
+        setSponsorState({ ok: false, msg: 'No Sui wallet extension detected. Install Slush, refresh the page, and allow the extension on this site.' })
+        return
       }
+
+      setWalletProviders(providers)
+      setWalletNames(providers.map((w) => w.name?.trim() || 'Sui wallet'))
+      // Pre-select the previously linked wallet if available, otherwise default to 0
+      const preferredIndex = linkedWallet
+        ? Math.max(0, providers.findIndex((p) => p.name === linkedWallet.provider))
+        : 0
+      setSelectedWalletIndex(preferredIndex)
+      setWalletPickerMode('sign')
+      setWalletPickerOpen(true)
     } catch (error) {
       setSponsorState({ ok: false, msg: error instanceof Error ? error.message : 'Sponsorship failed.' })
     } finally {
