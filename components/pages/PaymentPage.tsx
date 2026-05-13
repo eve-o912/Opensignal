@@ -117,37 +117,9 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
-/** Decode a JWT and return its payload, or null if malformed. */
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const part = token.split('.')[1]
-    if (!part) return null
-    const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=')
-    return JSON.parse(atob(padded)) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-/** Extract the Sui wallet address from a JWT payload, trying common claim names. */
-function walletAddressFromJwt(token: string): string | null {
-  const payload = decodeJwtPayload(token)
-  if (!payload) return null
-  const candidates = [
-    payload.walletAddress,
-    payload.wallet_address,
-    payload.address,
-    payload.suiAddress,
-    payload.sui_address,
-  ]
-  for (const c of candidates) {
-    if (typeof c === 'string' && /^0x[a-fA-F0-9]{63,64}$/.test(c)) return c
-  }
-  return null
-}
 
 export default function PaymentPage() {
-  const { jwt } = useAuth()
+  const { jwt, walletAddress } = useAuth()
   const [apiKey, setApiKey] = useState('')
   const [network, setNetwork] = useState<'testnet' | 'mainnet'>('testnet')
   const [senderAddress, setSenderAddress] = useState('')
@@ -222,22 +194,18 @@ export default function PaymentPage() {
     }
   }, [])
 
-  // Auto-fill sender address from the signed-in account.
-  // Priority: 1) JWT wallet address claim  2) localStorage linked wallet
-  // 3) injected wallet extension accounts (if browser wallet is connected)
+  // Auto-fill sender address. Priority:
+  // 1. walletAddress from AuthContext (resolved from JWT claim or /me endpoint)
+  // 2. localStorage linked wallet (wallet-login sessions)
+  // 3. Injected browser wallet extension (already-connected accounts only)
   useEffect(() => {
     if (senderOverridden) return
 
-    // 1. Try to read the address straight from the JWT payload
-    if (jwt) {
-      const jwtAddress = walletAddressFromJwt(jwt)
-      if (jwtAddress) {
-        setSenderAddress(jwtAddress)
-        return
-      }
+    if (walletAddress) {
+      setSenderAddress(walletAddress)
+      return
     }
 
-    // 2. Fall back to localStorage (covers wallet-login sessions)
     if (typeof window !== 'undefined') {
       const stored = readLinkedWallet('default')
       if (stored) {
@@ -246,12 +214,11 @@ export default function PaymentPage() {
         return
       }
     }
-  }, [jwt, senderOverridden])
+  }, [walletAddress, senderOverridden])
 
-  // 3. If still no address, try the injected wallet extension accounts list
-  //    (no approval prompt — only reads already-connected accounts)
+  // Fallback: injected wallet extension already-connected accounts
   useEffect(() => {
-    if (senderOverridden) return
+    if (senderOverridden || walletAddress) return
     if (walletProviders.length === 0) return
 
     const preferred = linkedWallet
@@ -262,13 +229,11 @@ export default function PaymentPage() {
 
     const accounts = provider.accounts
     if (!accounts || accounts.length === 0) return
-
     const address = accounts[0].address
     if (!address) return
 
     setSenderAddress((current) => {
       if (current || senderOverridden) return current
-      // Persist so future visits restore from localStorage
       if (!linkedWallet) {
         const walletInfo: LinkedWalletInfo = { address, provider: provider.name?.trim() || 'Sui wallet' }
         saveLinkedWallet('default', walletInfo)
@@ -277,7 +242,7 @@ export default function PaymentPage() {
       return address
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletProviders])
+  }, [walletProviders, walletAddress])
 
   async function performLinkWallet(provider: InjectedWalletProvider) {
     const accountAddress = await connectWalletAndGetAddress(provider)

@@ -117,37 +117,9 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes
 }
 
-/** Decode a JWT and return its payload, or null if malformed. */
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const part = token.split('.')[1]
-    if (!part) return null
-    const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=')
-    return JSON.parse(atob(padded)) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
-/** Extract the Sui wallet address from a JWT payload, trying common claim names. */
-function walletAddressFromJwt(token: string): string | null {
-  const payload = decodeJwtPayload(token)
-  if (!payload) return null
-  const candidates = [
-    payload.walletAddress,
-    payload.wallet_address,
-    payload.address,
-    payload.suiAddress,
-    payload.sui_address,
-  ]
-  for (const c of candidates) {
-    if (typeof c === 'string' && /^0x[a-fA-F0-9]{63,64}$/.test(c)) return c
-  }
-  return null
-}
 
 export default function CheckoutPage() {
-  const { jwt } = useAuth()
+  const { jwt, walletAddress } = useAuth()
   const searchParams = useSearchParams()
 
   const sessionId = searchParams.get('checkoutSessionId') ?? ''
@@ -230,22 +202,19 @@ export default function CheckoutPage() {
         setTxBuildState(null)
 
         // Resolve sender address in priority order:
-        // 1. JWT wallet address claim (email-login users)
+        // 1. walletAddress from AuthContext (JWT claim or /me endpoint)
         // 2. localStorage linked wallet (wallet-login users or previously linked)
         const sessionKey = r.data.session.id || sessionId
         const stored = readLinkedWallet(sessionKey)
 
-        const jwtAddress = jwt ? walletAddressFromJwt(jwt) : null
-        if (jwtAddress) {
-          setSender(jwtAddress)
+        if (walletAddress) {
+          setSender(walletAddress)
           setSenderOverridden(false)
         } else if (stored) {
           setLinkedWallet(stored)
           setSender(stored.address)
           setSenderOverridden(false)
         } else {
-          // No address available yet — reset override flag so that linking a
-          // wallet later will auto-fill correctly.
           setSenderOverridden(false)
         }
       } else {
@@ -269,6 +238,13 @@ export default function CheckoutPage() {
 
     loadSession()
   }, [sessionId, checkoutToken])
+
+  // Keep sender in sync with the authenticated wallet address whenever it changes
+  // (covers page load before a session is fetched, and jwt changes)
+  useEffect(() => {
+    if (senderOverridden || !walletAddress) return
+    setSender(walletAddress)
+  }, [walletAddress, senderOverridden])
 
   const buildTransactionKindFromIntent = useCallback(async (): Promise<string | null> => {
     if (!sessionDetails || !sender) return null
