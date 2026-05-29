@@ -1,127 +1,101 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { useToast } from '@/context/ToastContext'
-import { apiCall, getApiErrorMessage } from '@/lib/api'
 import SectionHeader from '@/components/layout/SectionHeader'
-import FormPanel from '@/components/layout/FormPanel'
-import Input from '@/components/ui/Input'
-import Button from '@/components/ui/Button'
-import ResponseBox from '@/components/ui/ResponseBox'
-import Spinner from '@/components/ui/Spinner'
 
 interface AccountPageProps {
   onNavigate?: (page: string) => void
 }
 
 export default function AccountPage({ onNavigate }: AccountPageProps) {
-  const { jwt, setJwt } = useAuth()
-  const { show }   = useToast()
+  const { jwt, user, setJwt, setUser, baseUrl } = useAuth()
 
-  const [suEmail,   setSuEmail]   = useState('')
-  const [suPass,    setSuPass]    = useState('')
-  const [suConfirm, setSuConfirm] = useState('')
-  const [suState,   setSuState]   = useState<{ ok: boolean; msg: string } | null>(null)
-  const [suLoading, setSuLoading] = useState(false)
+  const tokenPreview = useMemo(() => {
+    if (!jwt) return 'No active session'
+    if (jwt.length <= 16) return jwt
+    return `${jwt.slice(0, 8)}…${jwt.slice(-6)}`
+  }, [jwt])
 
-  const [liEmail,   setLiEmail]   = useState('')
-  const [liPass,    setLiPass]    = useState('')
-  const [liState,   setLiState]   = useState<{ ok: boolean; msg: string } | null>(null)
-  const [liLoading, setLiLoading] = useState(false)
+  const initials = useMemo(() => {
+    const source = user?.name?.trim() || user?.email?.trim() || 'U'
+    return source
+      .split(/\s+/)
+      .map((part: string) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase()
+  }, [user])
 
-  const normalizedSignupEmail = suEmail.trim().toLowerCase()
-  const signupEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedSignupEmail)
-  const signupPasswordValid = suPass.length >= 8
-  const signupMatches = suPass === suConfirm
-  const signupReady = signupEmailValid && signupPasswordValid && signupMatches
-
-  async function doSignup() {
-    if (!signupReady) {
-      setSuState({ ok: false, msg: 'Use a valid email, password of at least 8 characters, and matching confirmation.' })
-      return
-    }
-
-    setSuLoading(true); setSuState(null)
-    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/signup', {
-      email: normalizedSignupEmail,
-      password: suPass,
-    })
-    setSuLoading(false)
-    if (r.ok && r.data.token) {
-      setJwt(r.data.token)
-      setSuState({ ok: true, msg: 'Account created and signed in. You can now create apps and keys.' })
-      setLiEmail(normalizedSignupEmail)
-      setLiPass('')
-      setSuPass('')
-      setSuConfirm('')
-      show('Welcome to OpenSignal')
-      onNavigate?.('apps')
-      return
-    }
-
-    setSuState(r.ok
-      ? { ok: true,  msg: 'Account created! Sign in below to get started.' }
-      : { ok: false, msg: getApiErrorMessage(r.data, 'Something went wrong. Please try again.') }
-    )
-  }
-
-  async function doLogin() {
-    setLiLoading(true); setLiState(null)
-    const r = await apiCall<{ token?: string }>('POST', '/v1/portal/auth/login', { email: liEmail, password: liPass })
-    setLiLoading(false)
-    if (r.ok && r.data.token) {
-      setJwt(r.data.token)
-      setLiState({ ok: true, msg: "You're in! Head to the Dashboard to see your activity." })
-      show('Signed in successfully')
-    } else {
-      setLiState({ ok: false, msg: getApiErrorMessage(r.data, 'Incorrect email or password.') })
-    }
+  function handleSignOut() {
+    setJwt(null)
+    setUser(null)
+    onNavigate?.('landing')
   }
 
   return (
     <div>
       <SectionHeader
-        eyebrow="Access"
-        title="Your account"
-        sub="Create an account or sign in to start sponsoring transactions."
+        eyebrow="Account"
+        title="Your details"
+        sub="A read-only snapshot of the current signed-in user and session."
       />
 
-      {jwt && (
-        <div className="mb-3 rounded-xl border border-green-700 bg-gray-900 px-3.5 py-3 text-sm text-green-100">
-          Signed in successfully. Continue with app setup from the Apps or Checkout sections.
-        </div>
-      )}
+      <div className="rounded-2xl border border-gray-800 bg-gray-950 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+        <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-cyan-500 to-blue-700 text-lg font-semibold text-white">
+              {initials}
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.28em] text-gray-500">Profile</p>
+              <h3 className="mt-1 text-2xl font-semibold text-white">
+                {user?.name || user?.email || 'Signed-in user'}
+              </h3>
+              <p className="mt-1 text-sm text-gray-400">
+                {user?.email ? 'Email account' : 'No profile data available yet'}
+              </p>
+            </div>
+          </div>
 
-      <FormPanel step={1} title="Create an account" desc="Just your email and a password. That's it.">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-          <Input label="Email address" type="email" placeholder="you@example.com"
-            value={suEmail} onChange={(e) => setSuEmail(e.target.value)} />
-          <Input label="Password" type="password" placeholder="Choose a password"
-            value={suPass} onChange={(e) => setSuPass(e.target.value)} />
-          <Input label="Confirm password" type="password" placeholder="Repeat your password"
-            value={suConfirm} onChange={(e) => setSuConfirm(e.target.value)} />
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="inline-flex h-10 items-center justify-center rounded-full border border-gray-700 px-4 text-sm font-medium text-white transition hover:border-gray-500 hover:bg-gray-900"
+          >
+            Sign out
+          </button>
         </div>
-        <Button variant="primary" onClick={doSignup} disabled={suLoading || !signupReady}>
-          {suLoading ? 'Creating…' : 'Create account'}
-        </Button>
-        {suLoading && <Spinner label="Creating your account…" />}
-        {suState && <ResponseBox ok={suState.ok} friendly={suState.msg} />}
-      </FormPanel>
 
-      <FormPanel step={2} title="Already have an account?" desc="Sign in to unlock your dashboard and API keys.">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-          <Input label="Email address" type="email" placeholder="you@example.com"
-            value={liEmail} onChange={(e) => setLiEmail(e.target.value)} />
-          <Input label="Password" type="password" placeholder="Your password"
-            value={liPass} onChange={(e) => setLiPass(e.target.value)} />
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-gray-800 bg-black/40 p-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-gray-500">Name</p>
+            <p className="mt-2 text-sm font-medium text-white">{user?.name || 'Not set'}</p>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-black/40 p-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-gray-500">Email</p>
+            <p className="mt-2 break-all text-sm font-medium text-white">{user?.email || 'Not set'}</p>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-black/40 p-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-gray-500">Session</p>
+            <p className="mt-2 text-sm font-medium text-white">{jwt ? 'Authenticated' : 'Signed out'}</p>
+            <p className="mt-1 text-xs text-gray-500">{tokenPreview}</p>
+          </div>
+
+          <div className="rounded-2xl border border-gray-800 bg-black/40 p-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-gray-500">API base</p>
+            <p className="mt-2 break-all text-sm font-medium text-white">{baseUrl}</p>
+          </div>
         </div>
-        <Button variant="primary" onClick={doLogin} disabled={liLoading}>
-          {liLoading ? 'Signing in…' : 'Sign in'}
-        </Button>
-        {liLoading && <Spinner label="Signing you in…" />}
-        {liState && <ResponseBox ok={liState.ok} friendly={liState.msg} />}
-      </FormPanel>
+
+        {!jwt && (
+          <div className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/30 p-4 text-sm text-amber-200">
+            No active session found. Sign in again to populate your profile details.
+          </div>
+        )}
+      </div>
     </div>
   )
 }

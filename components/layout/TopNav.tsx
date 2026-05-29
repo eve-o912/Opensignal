@@ -53,10 +53,6 @@ export default function TopNav({ activePage, onNav, onMenuToggle }: Props) {
         )}
         
         <ConnectWallet />
-        
-        <span className="text-sm text-white ml-1">
-          {jwt ? <Badge variant="ok">Signed in</Badge> : <span className="text-white/60">Not signed in</span>}
-        </span>
       </div>
     </nav>
   )

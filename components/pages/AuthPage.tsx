@@ -18,7 +18,7 @@ interface Props {
 
 export default function AuthPage({ mode, googleClientId }: Props) {
   const router = useRouter()
-  const { jwt, setJwt } = useAuth()
+  const { jwt, setJwt, setUser } = useAuth()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -72,6 +72,9 @@ export default function AuthPage({ mode, googleClientId }: Props) {
 
     if (response.ok && data.token) {
       setJwt(data.token)
+      if ('user' in data && data.user && typeof data.user === 'object') {
+        setUser(data.user as { id?: string; email?: string; name?: string | null })
+      }
       setSuccess(mode === 'register' ? 'Account created successfully.' : 'Signed in successfully.')
       router.push('/')
       return
@@ -184,7 +187,7 @@ export default function AuthPage({ mode, googleClientId }: Props) {
               variant="primary"
               onClick={handleSubmit}
               disabled={loading || !canSubmit}
-              className="w-full !py-3"
+              className="w-full py-3!"
             >
               {loading ? (mode === 'register' ? 'Creating account...' : 'Signing in...') : (mode === 'register' ? 'Create account' : 'Sign in')}
             </Button>
