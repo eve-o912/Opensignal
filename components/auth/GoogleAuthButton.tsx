@@ -24,13 +24,12 @@ interface Props {
   mode: 'login' | 'register'
 }
 
-export default function GoogleAuthButton({ clientId, mode }: Props) {
+export default function GoogleAuthButton({ clientId, mode: _mode }: Props) {
   const [loading, setLoading] = useState(false)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { setJwt } = useAuth()
   const router = useRouter()
-
   useEffect(() => {
     if (!clientId) return
 
