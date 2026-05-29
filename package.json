@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@mysten/sui": "^2.16.0",
-    "@prisma/client": "^6.16.2",
+    "@mysten/wallet-standard": "^0.20.3",
     "autoprefixer": "^10.4.27",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",

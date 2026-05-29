@@ -17,6 +17,8 @@ const items: Item[] = [
     icon: <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M8 1l2 4.5h4.5l-3.6 2.6 1.4 4.5L8 10 3.7 12.6l1.4-4.5L1.5 5.5H6z"/></svg> },
   { id: 'checkout', label: 'Checkout',
     icon: <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 4h10l-1 7H4L3 4z"/><path d="M6 7h4"/></svg> },
+  { id: 'payment', label: 'P2P Payment',
+    icon: <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="8" cy="8" r="5.5"/><path d="M5 8h6M8 5v6"/></svg> },
   { id: 'settings', label: 'Settings', section: 'System',
     icon: <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.1 3.1l1.4 1.4M11.5 11.5l1.4 1.4M3.1 12.9l1.4-1.4M11.5 4.5l1.4-1.4"/></svg> },
 ]
