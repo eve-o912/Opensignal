@@ -122,6 +122,7 @@ function base64ToBytes(base64: string): Uint8Array {
 
 export default function CheckoutPage() {
   const { jwt, walletAddress } = useAuth()
+  const { wallet } = useWallet()
   const searchParams = useSearchParams()
 
   const sessionId = searchParams.get('checkoutSessionId') ?? ''
