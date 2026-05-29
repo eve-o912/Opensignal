@@ -5,7 +5,6 @@ import { useAuth } from '@/context/AuthContext'
 import { apiCall, seedSpark, sparkLabels } from '@/lib/api'
 import { DApp, SponsorEvent, UsageSummary } from '@/types'
 import SectionHeader from '@/components/layout/SectionHeader'
-import Pipeline from '@/components/dashboard/Pipeline'
 import KpiGrid from '@/components/dashboard/KpiGrid'
 import SparkCard from '@/components/dashboard/SparkCard'
 import GasBarChart from '@/components/dashboard/GasBarChart'
@@ -164,7 +163,7 @@ export default function DashboardPage() {
   const kpiDapps = isDemo ? '—' : dapps.length.toString()
   const kpiKeys  = isDemo ? '—' : keyCount.toString()
 
-  
+
   return (
     <div className="w-full">
       <SectionHeader
@@ -172,7 +171,7 @@ export default function DashboardPage() {
         title="Your signal, at a glance"
         sub="Real-time sponsorship data across all your apps — refreshed on demand."
       />
-      <Pipeline />
+     
       <KpiGrid txns={kpiTxns} gas={kpiGas} dapps={kpiDapps} keys={kpiKeys} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         <SparkCard

@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { useAuth } from '@/context/AuthContext'
+import { useWallet } from '@/context/WalletContext'
 import { apiCall, getApiErrorMessage } from '@/lib/api'
 import SectionHeader from '@/components/layout/SectionHeader'
 import FormPanel from '@/components/layout/FormPanel'
@@ -121,6 +122,7 @@ function base64ToBytes(base64: string): Uint8Array {
 
 export default function CheckoutPage() {
   const { jwt, walletAddress } = useAuth()
+  const { wallet } = useWallet()
   const searchParams = useSearchParams()
 
   const sessionId = searchParams.get('checkoutSessionId') ?? ''
@@ -162,6 +164,13 @@ export default function CheckoutPage() {
     if (!checkoutUrl) return ''
     return checkoutUrl
   }, [checkoutUrl])
+
+  // Auto-fill sender when wallet connects
+  useEffect(() => {
+    if (wallet && !sender) {
+      setSender(wallet.address)
+    }
+  }, [wallet, sender])
 
   useEffect(() => {
     async function loadApps() {

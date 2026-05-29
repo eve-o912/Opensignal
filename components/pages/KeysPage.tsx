@@ -172,10 +172,10 @@ export default function KeysPage() {
           <Input label="Key nickname" placeholder="e.g. Production key"
             value={keyName} onChange={(e) => setKeyName(e.target.value)}
             hint="A label just for you" />
-          <label className="text-xs font-semibold text-blue-700 flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-white flex flex-col gap-1.5">
             Which app is this for?
             <select
-              className="h-10 rounded-xl border border-blue-100 bg-white px-3 text-sm text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className="h-10 rounded-xl border border-gray-600 bg-gray-800 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gray-600"
               value={selectedAppId}
               onChange={(e) => setSelectedAppId(e.target.value)}
               disabled={!apps.length}
@@ -192,9 +192,9 @@ export default function KeysPage() {
         </Button>
         {createState && <ResponseBox ok={createState.ok} friendly={createState.msg} />}
         {latestSecret && (
-          <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3">
-            <p className="text-xs font-semibold text-blue-900 mb-2">New key secret</p>
-            <p className="font-mono text-xs text-blue-800 break-all mb-3">{latestSecret.secret}</p>
+          <div className="mt-3 rounded-xl border border-gray-700 bg-gray-900 p-3">
+            <p className="text-xs font-semibold text-white mb-2">New key secret</p>
+            <p className="font-mono text-xs text-gray-300 break-all mb-3">{latestSecret.secret}</p>
             <Button variant="sm" onClick={() => copySecret(latestSecret.secret)}>Copy key</Button>
           </div>
         )}
@@ -204,17 +204,17 @@ export default function KeysPage() {
         <div className="flex justify-end mb-3">
           <Button variant="sm" onClick={loadKeys}>Refresh</Button>
         </div>
-        {!jwt    && <p className="text-sm text-blue-400">Sign in to view your keys</p>}
+        {!jwt    && <p className="text-sm text-gray-400">Sign in to view your keys</p>}
         {jwt && loading && <Spinner label="Loading your keys…" />}
         {jwt && !loading && keys.length === 0 && (
-          <p className="text-sm text-blue-400">No keys yet — create one above.</p>
+          <p className="text-sm text-gray-400">No keys yet — create one above.</p>
         )}
-        <div className="divide-y divide-blue-50">
+        <div className="divide-y divide-gray-700">
           {keys.map((k) => (
             <div key={k.id} className="flex items-center justify-between py-3 gap-2 flex-wrap">
               <div>
-                <p className="font-semibold text-sm text-blue-900">{k.name ?? 'Unnamed key'}</p>
-                <p className="font-mono text-xs text-blue-600 mt-0.5">{k.key ?? k.id}</p>
+                <p className="font-semibold text-sm text-white">{k.name ?? 'Unnamed key'}</p>
+                <p className="font-mono text-xs text-gray-500 mt-0.5">{k.key ?? k.id}</p>
                 {storedSecrets[k.id] && (
                   <div className="mt-2">
                     <Button variant="sm" onClick={() => copySecret(storedSecrets[k.id])}>Copy full key</Button>

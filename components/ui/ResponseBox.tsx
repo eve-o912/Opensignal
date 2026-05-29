@@ -10,7 +10,7 @@ export default function ResponseBox({ ok, friendly, raw }: Props) {
   if (friendly) {
     return (
       <div className={`mt-2.5 rounded-xl px-3.5 py-3 text-sm border ${
-        ok ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-800'
+        ok ? 'bg-gray-900 border-green-700 text-green-100' : 'bg-gray-900 border-red-700 text-red-100'
       }`}>
         {friendly}
       </div>
@@ -20,7 +20,7 @@ export default function ResponseBox({ ok, friendly, raw }: Props) {
   const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2)
   return (
     <pre className={`mt-2.5 rounded-xl px-3.5 py-3 text-xs font-mono whitespace-pre-wrap break-all max-h-44 overflow-y-auto border ${
-      ok ? 'bg-blue-50 border-blue-100 text-blue-900' : 'bg-red-50 border-red-200 text-red-800'
+      ok ? 'bg-gray-900 border-gray-700 text-gray-100' : 'bg-gray-900 border-red-700 text-red-100'
     }`}>
       {text}
     </pre>

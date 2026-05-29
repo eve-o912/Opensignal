@@ -80,7 +80,7 @@ export default function SponsorPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="Your API key" placeholder="os_live_..."
               value={qApiKey} onChange={(e) => setQApiKey(e.target.value)} />
-            <div className="text-xs text-blue-500 self-end pb-1">
+            <div className="text-xs text-gray-400 self-end pb-1">
               App is inferred from your API key.
             </div>
           </div>

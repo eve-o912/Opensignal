@@ -3,9 +3,9 @@ import { ReactNode } from 'react'
 type Variant = 'ok' | 'err' | 'warn'
 
 const styles: Record<Variant, string> = {
-  ok:   'bg-teal-50 text-teal-900 border border-teal-200',
-  err:  'bg-red-50 text-red-800 border border-red-200',
-  warn: 'bg-amber-50 text-amber-900 border border-amber-200',
+  ok:   'bg-green-900 text-green-100 border border-green-700',
+  err:  'bg-red-900 text-red-100 border border-red-700',
+  warn: 'bg-amber-900 text-amber-100 border border-amber-700',
 }
 
 export default function Badge({ variant, children }: { variant: Variant; children: ReactNode }) {

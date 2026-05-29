@@ -103,17 +103,17 @@ export default function AppsPage() {
         <div className="flex justify-end mb-3">
           <Button variant="sm" onClick={loadDapps}>Refresh</Button>
         </div>
-        {!jwt    && <p className="text-sm text-blue-400">Sign in to view your apps</p>}
+        {!jwt    && <p className="text-sm text-gray-400">Sign in to view your apps</p>}
         {jwt && loading && <Spinner label="Loading your apps…" />}
         {jwt && !loading && dapps.length === 0 && (
-          <p className="text-sm text-blue-400">No apps yet — use the form above to register one.</p>
+          <p className="text-sm text-gray-400">No apps yet — use the form above to register one.</p>
         )}
-        <div className="divide-y divide-blue-50">
+        <div className="divide-y divide-gray-700">
           {dapps.map((d) => (
             <div key={d.id} className="flex items-center justify-between py-3 gap-2 flex-wrap">
               <div>
-                <p className="font-semibold text-sm text-blue-900">{d.name ?? 'Unnamed app'}</p>
-                <p className="text-xs text-blue-400 mt-0.5 font-mono">ID: {d.id}</p>
+                <p className="font-semibold text-sm text-white">{d.name ?? 'Unnamed app'}</p>
+                <p className="text-xs text-gray-500 mt-0.5 font-mono">ID: {d.id}</p>
               </div>
               <Badge variant={d.wildcardSponsor ? 'warn' : 'ok'}>
                 {d.wildcardSponsor ? 'All transactions' : 'Allowlist only'}
