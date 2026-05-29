@@ -6,6 +6,7 @@ export interface AuthUser {
   id?: string
   email?: string
   name?: string | null
+  walletAddress?: string | null
 }
 
 function resolveDefaultBaseUrl(): string {
@@ -26,6 +27,7 @@ interface AuthCtx {
   setJwt: (t: string | null) => void
   user: AuthUser | null
   setUser: (u: AuthUser | null) => void
+  walletAddress: string | null
   baseUrl: string
   setBaseUrl: (u: string) => void
 }
@@ -35,6 +37,7 @@ const AuthContext = createContext<AuthCtx>({
   setJwt: () => {},
   user: null,
   setUser: () => {},
+  walletAddress: null,
   baseUrl: DEFAULT_BASE_URL,
   setBaseUrl: () => {},
 })
@@ -80,7 +83,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [baseUrl])
 
   return (
-    <AuthContext.Provider value={{ jwt, setJwt, user, setUser, baseUrl, setBaseUrl }}>
+    <AuthContext.Provider
+      value={{
+        jwt,
+        setJwt,
+        user,
+        setUser,
+        walletAddress: user?.walletAddress ?? null,
+        baseUrl,
+        setBaseUrl,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )
