@@ -38,7 +38,6 @@ export async function POST(request: Request) {
         email,
         passwordHash: await hashPassword(password),
         name: name ?? undefined,
-        emailVerifiedAt: new Date(),
         lastLoginAt: new Date(),
       },
     })

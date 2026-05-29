@@ -29,7 +29,7 @@ export default function LandingPage({ onSignUp, onSignIn }: LandingPageProps) {
               Gas-Free Transactions
             </h2>
             <p className="text-xl md:text-2xl text-gray-400 mb-6">
-              Eliminate gas complexity from your users' experience. OpenSignal sponsors blockchain transactions on Sui.
+              Eliminate gas complexity from your users&apos; experience. OpenSignal sponsors blockchain transactions on Sui.
             </p>
           </div>
 
@@ -71,19 +71,9 @@ export default function LandingPage({ onSignUp, onSignIn }: LandingPageProps) {
           </div>
 
           {/* Technical Highlights */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-              <div className="text-3xl font-bold text-white mb-2">86</div>
-              <p className="text-sm text-gray-400">Active dApps</p>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-              <div className="text-3xl font-bold text-white mb-2">1.24M</div>
-              <p className="text-sm text-gray-400">Txns Sponsored Today</p>
-            </div>
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-              <div className="text-3xl font-bold text-white mb-2">43.8K</div>
-              <p className="text-sm text-gray-400">SUI in Gas Covered</p>
-            </div>
+          <div className="mb-12 rounded-xl border border-gray-800 bg-gray-900 p-6 text-center">
+            <p className="text-sm font-medium text-gray-300">Live network metrics are not available yet.</p>
+            <p className="mt-2 text-xs text-gray-500">Metrics panel coming soon.</p>
           </div>
 
           {/* CTA Section */}

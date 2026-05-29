@@ -42,29 +42,45 @@ export async function POST(request: Request) {
     const googleId = payload.sub
     const displayName = sanitizeName(payload.name)
 
-    let user = await prisma.user.findFirst({
-      where: {
-        OR: [{ googleId }, { email }],
-      },
+    let user = await prisma.user.findUnique({
+      where: { googleId },
     })
 
     if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email,
-          googleId,
-          name: displayName ?? undefined,
-          emailVerifiedAt: new Date(),
-          lastLoginAt: new Date(),
-        },
-      })
+      const emailOwner = await prisma.user.findUnique({ where: { email } })
+
+      if (emailOwner) {
+        if (!emailOwner.emailVerifiedAt) {
+          return NextResponse.json(
+            { error: 'Account merge required. Verify your email-password account before linking Google.' },
+            { status: 409 },
+          )
+        }
+
+        user = await prisma.user.update({
+          where: { id: emailOwner.id },
+          data: {
+            googleId,
+            name: emailOwner.name ?? displayName ?? undefined,
+            lastLoginAt: new Date(),
+          },
+        })
+      } else {
+        user = await prisma.user.create({
+          data: {
+            email,
+            googleId,
+            name: displayName ?? undefined,
+            emailVerifiedAt: new Date(),
+            lastLoginAt: new Date(),
+          },
+        })
+      }
     } else {
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
-          googleId: user.googleId ?? googleId,
           name: user.name ?? displayName ?? undefined,
-          emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
           lastLoginAt: new Date(),
         },
       })

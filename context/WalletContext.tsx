@@ -7,6 +7,11 @@ interface WalletInfo {
   publicKey?: string
 }
 
+interface WalletProvider {
+  connect?: () => Promise<{ accounts?: WalletInfo[] }>
+  getAccounts?: () => Promise<WalletInfo[]>
+}
+
 interface WalletContextType {
   wallet: WalletInfo | null
   isConnecting: boolean
@@ -16,6 +21,18 @@ interface WalletContextType {
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
+
+function isValidWallet(value: unknown): value is WalletInfo {
+  if (!value || typeof value !== 'object') return false
+  const parsed = value as { address?: unknown }
+  return typeof parsed.address === 'string' && parsed.address.trim().length > 0
+}
+
+function isWalletProvider(value: unknown): value is WalletProvider {
+  if (!value || typeof value !== 'object') return false
+  const provider = value as WalletProvider
+  return typeof provider.connect === 'function' || typeof provider.getAccounts === 'function'
+}
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<WalletInfo | null>(null)
@@ -27,7 +44,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const storedWallet = localStorage.getItem('os_connected_wallet')
     if (storedWallet) {
       try {
-        setWallet(JSON.parse(storedWallet))
+        const parsed = JSON.parse(storedWallet)
+        if (isValidWallet(parsed)) {
+          setWallet(parsed)
+        } else {
+          localStorage.removeItem('os_connected_wallet')
+        }
       } catch {
         localStorage.removeItem('os_connected_wallet')
       }
@@ -40,7 +62,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     try {
       // Check if Sui Wallet is injected
-      const suiWalletWindow = window as any
+      const suiWalletWindow = window as Window & {
+        suiWallet?: unknown
+        getWallets?: () => unknown[]
+      }
       const walletProvider = suiWalletWindow.suiWallet || suiWalletWindow.getWallets?.()[0]
 
       if (!walletProvider && !suiWalletWindow.suiWallet) {
@@ -51,6 +76,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       // Use the Sui wallet adapter
       const provider = walletProvider || suiWalletWindow.suiWallet
+      if (!isWalletProvider(provider)) {
+        setError('Wallet provider is not compatible.')
+        return
+      }
       
       // Connect to wallet
       if (provider.connect) {
@@ -63,6 +92,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           }
           setWallet(walletInfo)
           localStorage.setItem('os_connected_wallet', JSON.stringify(walletInfo))
+        } else {
+          setWallet(null)
+          localStorage.removeItem('os_connected_wallet')
+          setError('No accounts returned from wallet.')
         }
       } else if (provider.getAccounts) {
         // Fallback for wallets that only expose getAccounts
@@ -74,6 +107,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           }
           setWallet(walletInfo)
           localStorage.setItem('os_connected_wallet', JSON.stringify(walletInfo))
+        } else {
+          setWallet(null)
+          localStorage.removeItem('os_connected_wallet')
+          setError('No accounts returned from wallet.')
         }
       }
     } catch (err) {

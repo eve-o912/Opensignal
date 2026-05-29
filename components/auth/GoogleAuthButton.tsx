@@ -45,22 +45,27 @@ export default function GoogleAuthButton({ clientId, mode }: Props) {
           setLoading(true)
           setError(null)
 
-          const response = await fetch('/api/auth/google', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ credential }),
-          })
-          setLoading(false)
+          try {
+            const response = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credential }),
+            })
 
-          const data = await response.json().catch(() => ({})) as { token?: string; error?: string }
+            const data = await response.json().catch(() => ({})) as { token?: string; error?: string }
 
-          if (response.ok && data.token) {
-            setJwt(data.token)
-            router.push('/')
-            return
+            if (response.ok && data.token) {
+              setJwt(data.token)
+              router.push('/')
+              return
+            }
+
+            setError(data.error ?? 'Google sign-in failed.')
+          } catch {
+            setError(getApiErrorMessage({}, 'Could not connect to Google sign-in. Please try again.'))
+          } finally {
+            setLoading(false)
           }
-
-          setError(data.error ?? 'Google sign-in failed.')
         },
       })
 

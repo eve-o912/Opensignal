@@ -56,31 +56,38 @@ export default function AuthPage({ mode, googleClientId }: Props) {
     }
 
     setLoading(true)
-    const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login'
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: normalizedEmail,
-        password,
-        name: mode === 'register' ? nameValue : undefined,
-      }),
-    })
-    setLoading(false)
 
-    const data = await response.json().catch(() => ({})) as { token?: string; error?: string }
+    try {
+      const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password,
+          name: mode === 'register' ? nameValue : undefined,
+        }),
+      })
 
-    if (response.ok && data.token) {
-      setJwt(data.token)
-      if ('user' in data && data.user && typeof data.user === 'object') {
-        setUser(data.user as { id?: string; email?: string; name?: string | null })
+      const data = await response.json().catch(() => ({})) as { token?: string; error?: string; user?: unknown }
+
+      if (response.ok && data.token) {
+        setJwt(data.token)
+        if (data.user && typeof data.user === 'object') {
+          setUser(data.user as { id?: string; email?: string; name?: string | null })
+        }
+        setSuccess(mode === 'register' ? 'Account created successfully.' : 'Signed in successfully.')
+        router.push('/')
+        return
       }
-      setSuccess(mode === 'register' ? 'Account created successfully.' : 'Signed in successfully.')
-      router.push('/')
-      return
-    }
 
-    setError(data.error ?? getApiErrorMessage({}, mode === 'register' ? 'Could not create account.' : 'Incorrect email or password.'))
+      setError(data.error ?? getApiErrorMessage({}, mode === 'register' ? 'Could not create account.' : 'Incorrect email or password.'))
+    } catch {
+      setError(getApiErrorMessage({}, mode === 'register' ? 'Could not create account.' : 'Incorrect email or password.'))
+      return
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -187,7 +194,7 @@ export default function AuthPage({ mode, googleClientId }: Props) {
               variant="primary"
               onClick={handleSubmit}
               disabled={loading || !canSubmit}
-              className="w-full py-3!"
+              className="w-full !py-3"
             >
               {loading ? (mode === 'register' ? 'Creating account...' : 'Signing in...') : (mode === 'register' ? 'Create account' : 'Sign in')}
             </Button>
